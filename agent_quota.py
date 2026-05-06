@@ -4,17 +4,34 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.live import Live
 from rich.measure import Measurement
+from rich.prompt import Confirm
 from rich.table import Table
 from rich.text import Text
 
 from common import format_eta, parse_window_direct, parse_window_percent
+
+
+CONFIG_PATH = Path("~/.config/agent-quota/config.toml").expanduser()
+
+
+# Static metadata used by setup/picker. Keep ordered — setup walks this dict
+# in registration order, which is also the table row order.
+PROVIDER_META: dict[str, tuple[str, str]] = {
+    "claude":  ("Claude",  "Claude.ai 5h / 7d quota (browser cookies)"),
+    "codex":   ("Codex",   "ChatGPT Codex 5h / weekly quota (browser cookies)"),
+    "copilot": ("Copilot", "GitHub Copilot premium requests (PAT or browser cookies)"),
+    "zai":     ("Z.ai",    "Z.ai 5h tokens / monthly tools (API token)"),
+    "zen":     ("Zen",     "OpenCode Zen balance (browser cookies)"),
+}
 
 
 # ===== Normalized data model =====
@@ -160,16 +177,118 @@ class _Provider:
 
 
 def _build_providers() -> dict[str, _Provider]:
-    # Copilot quota lives in the config file; load once so the adapter can format used/quota.
+    # Copilot quota lives in its own config file; load once so the adapter can
+    # format used/quota.
     from copilot import load_copilot_config
     copilot_quota = load_copilot_config().get("COPILOT_QUOTA") or 300
-    return {
-        "claude":  _Provider("Claude",  _fetch_claude,  _adapt_claude),
-        "codex":   _Provider("Codex",   _fetch_codex,   _adapt_codex),
-        "copilot": _Provider("Copilot", _fetch_copilot, _adapt_copilot_factory(copilot_quota)),
-        "zai":     _Provider("Z.ai",    _fetch_zai,     _adapt_zai),
-        "zen":     _Provider("Zen",     _fetch_zen,     _adapt_zen),
+    adapters = {
+        "claude":  _adapt_claude,
+        "codex":   _adapt_codex,
+        "copilot": _adapt_copilot_factory(copilot_quota),
+        "zai":     _adapt_zai,
+        "zen":     _adapt_zen,
     }
+    fetchers = {
+        "claude":  _fetch_claude,
+        "codex":   _fetch_codex,
+        "copilot": _fetch_copilot,
+        "zai":     _fetch_zai,
+        "zen":     _fetch_zen,
+    }
+    return {
+        key: _Provider(name=meta[0], fetch=fetchers[key], adapt=adapters[key])
+        for key, meta in PROVIDER_META.items()
+    }
+
+
+# ===== agent-quota config (which providers are enabled) =====
+
+def load_config() -> dict | None:
+    """Load ~/.config/agent-quota/config.toml. Returns None if missing or unreadable."""
+    if not CONFIG_PATH.exists():
+        return None
+    try:
+        with open(CONFIG_PATH, "rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        return None
+
+
+def save_config(enabled: list[str]) -> None:
+    """Persist the enabled-provider list as TOML.
+
+    Hand-written rather than using a TOML writer dep — the schema is one line.
+    """
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    body = ", ".join(f'"{k}"' for k in enabled)
+    CONFIG_PATH.write_text(
+        "# agent-quota configuration\n"
+        "# Edit this file or run `agent-quota setup` to change.\n"
+        f"enabled = [{body}]\n"
+    )
+
+
+def run_setup() -> int:
+    """Interactive picker for enabled providers. Writes config.toml and returns 0."""
+    console = Console()
+    console.print()
+    console.rule("[bold]agent-quota setup[/]")
+    console.print(
+        "Pick which providers to monitor. Re-run "
+        "[cyan]agent-quota setup[/] later to change.\n"
+    )
+
+    existing = (load_config() or {}).get("enabled") or list(PROVIDER_META)
+    enabled: list[str] = []
+    for key, (name, desc) in PROVIDER_META.items():
+        console.print(f"  [bold]{name:<8}[/]  [dim]{desc}[/]")
+        if Confirm.ask(f"  Enable {name}?", default=key in existing):
+            enabled.append(key)
+        console.print()
+
+    if not enabled:
+        console.print("[yellow]No providers selected — config not saved.[/]")
+        return 1
+
+    save_config(enabled)
+    console.print(f"[green]✓ saved[/] [dim]{CONFIG_PATH}[/]")
+    return 0
+
+
+def _resolve_keys(args, all_providers: dict[str, _Provider]) -> list[str] | None:
+    """Decide which provider keys to run for this invocation.
+
+    Precedence: --only > config.toml > interactive setup prompt > all providers.
+    Returns None if user input is invalid (caller exits 2).
+    """
+    if args.only:
+        keys = [k.strip().lower() for k in args.only.split(",") if k.strip()]
+        unknown = [k for k in keys if k not in all_providers]
+        if unknown:
+            sys.stderr.write(f"Unknown provider(s): {', '.join(unknown)}\n")
+            sys.stderr.write(f"Known: {', '.join(all_providers)}\n")
+            return None
+        return keys
+
+    cfg = load_config()
+    if cfg is not None and "enabled" in cfg:
+        keys = [k for k in cfg["enabled"] if k in all_providers]
+        if keys:
+            return keys
+
+    # No --only and no usable config. Offer to set up if interactive; otherwise
+    # fall back to running everything so cron/pipe usage still works.
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        Console().print(
+            f"[yellow]No agent-quota config at[/] [dim]{CONFIG_PATH}[/]"
+        )
+        if Confirm.ask("Run setup now?", default=True):
+            run_setup()
+            cfg = load_config()
+            if cfg and cfg.get("enabled"):
+                return [k for k in cfg["enabled"] if k in all_providers]
+
+    return list(all_providers)
 
 
 # ===== Error classification =====
@@ -324,7 +443,7 @@ def main() -> int:
     parser.add_argument(
         "--only",
         metavar="LIST",
-        help="Comma-separated providers (default: all). Known: claude,codex,copilot,zai,zen",
+        help="Comma-separated providers (overrides config). Known: claude,codex,copilot,zai,zen",
     )
     parser.add_argument(
         "--watch",
@@ -340,20 +459,19 @@ def main() -> int:
         metavar="NAME",
         help="Browser preference for cookie-auth providers; repeatable.",
     )
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("setup", help="Pick which providers to enable (writes config.toml).")
+
     args = parser.parse_args()
 
-    all_providers = _build_providers()
+    if args.command == "setup":
+        return run_setup()
 
-    if args.only:
-        keys = [k.strip().lower() for k in args.only.split(",") if k.strip()]
-        unknown = [k for k in keys if k not in all_providers]
-        if unknown:
-            sys.stderr.write(f"Unknown provider(s): {', '.join(unknown)}\n")
-            sys.stderr.write(f"Known: {', '.join(all_providers)}\n")
-            return 2
-        providers = {k: all_providers[k] for k in keys}
-    else:
-        providers = all_providers
+    all_providers = _build_providers()
+    keys = _resolve_keys(args, all_providers)
+    if keys is None:
+        return 2
+    providers = {k: all_providers[k] for k in keys}
 
     console = Console()
     browsers = args.browser

@@ -18,7 +18,7 @@ A provider script never imports another provider. The orchestrator (`agent_quota
 
 | File | Lines | Role |
 |------|-------|------|
-| `agent_quota.py` | ~270 | Orchestrator: parallel fetch, adapters, Rich rendering, `--watch` loop |
+| `agent_quota.py` | ~500 | Orchestrator: parallel fetch, adapters, Rich rendering (`_UsageBar` overlay), `--watch` loop, setup picker, config.toml I/O |
 | `common.py` | ~250 | `load_cookies`, `get_cached_or_fetch`, `format_eta`, `parse_window_*` |
 | `claude.py`, `codex.py` | ~110 each | Cookie-auth providers (claude.ai, chatgpt.com) |
 | `copilot.py` | ~230 | PAT-auth via `urllib`; Chrome-cookie HTML-scrape fallback for org-managed accounts |
@@ -51,12 +51,18 @@ Reuse from `common.py` rather than rolling your own. `format_eta` accepts ISO 86
 A new `<name>.py` requires touch-ups in **three places**:
 
 1. `pyproject.toml`: add to `[tool.hatch.build.targets.wheel].packages`.
-2. `agent_quota.py`: add a `_fetch_<name>` lazy-import function, an adapter that turns raw dict → `list[Metric]`, and an entry in `_build_providers()`.
+2. `agent_quota.py`: add a `_fetch_<name>` lazy-import function, an adapter that turns raw dict → `list[Metric]`, an entry in `PROVIDER_META` (drives the setup picker and table row order), and corresponding entries in `_build_providers()`'s `fetchers` and `adapters` dicts.
 3. The new `<name>.py` itself, conforming to the provider contract above.
 
 That's it — no UI orchestrator, no CSS, no JSON5 config writer.
 
 ## Cross-cutting concerns
+
+**Top-level config** (`~/.config/agent-quota/config.toml`)
+- One key: `enabled = ["claude", "codex", ...]`. Loaded by `agent_quota.load_config`.
+- Written by `agent-quota setup` (interactive picker via `rich.prompt.Confirm`).
+- Resolution order in `_resolve_keys`: `--only` flag > config.toml > interactive setup prompt (TTY only) > all providers.
+- Per-provider `~/.config/agent-quota/<name>.conf` files are unrelated — they hold tokens, not the enabled list.
 
 **Caching** (`common.get_cached_or_fetch`)
 - File-based: `~/.cache/agent-quota/<name>.json` with TTL (default 60s, Z.ai 120s).

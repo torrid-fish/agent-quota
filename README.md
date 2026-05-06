@@ -36,14 +36,27 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 ## Usage
 
 ```bash
-agent-quota                       # one-shot table
+agent-quota                       # one-shot table (uses ~/.config/agent-quota/config.toml)
+agent-quota setup                 # interactive picker for which providers to enable
 agent-quota --watch               # auto-refresh every 15s
 agent-quota --watch 30            # custom interval
-agent-quota --only claude,codex   # subset of providers
+agent-quota --only claude,codex   # one-off subset (overrides config)
 agent-quota --browser firefox     # cookie source for cookie-auth providers
 ```
 
 Press `Ctrl+C` to exit watch mode. Exit code is `0` if every selected provider is OK, `1` otherwise.
+
+## First run
+
+The first time you run `agent-quota` without a config file, it prompts you to pick which providers to monitor and saves your selection to `~/.config/agent-quota/config.toml`:
+
+```toml
+# agent-quota configuration
+# Edit this file or run `agent-quota setup` to change.
+enabled = ["claude", "codex", "copilot"]
+```
+
+Re-run `agent-quota setup` any time to change the selection. Pass `--only` to override the config for a single invocation. If stdin/stdout aren't a TTY (e.g. running from cron or piped), agent-quota skips the prompt and falls back to all providers so non-interactive use still works.
 
 ## Auth per provider
 
