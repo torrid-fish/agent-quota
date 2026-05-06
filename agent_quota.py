@@ -8,8 +8,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Callable
 
-from rich.console import Console
+from rich.console import Console, ConsoleOptions, RenderResult
 from rich.live import Live
+from rich.measure import Measurement
 from rich.table import Table
 from rich.text import Text
 
@@ -215,20 +216,50 @@ _STATE_STYLE = {"ok": "green", "auth_err": "red", "net_err": "yellow"}
 _STATE_LABEL = {"ok": "OK", "auth_err": "Auth Err", "net_err": "Net Err"}
 
 
-_BAR_WIDTH = 10
+class _UsageBar:
+    """Full-width progress bar with the metric value overlaid in the centre."""
+
+    def __init__(self, pct: float, value: str) -> None:
+        self.pct = max(0.0, min(100.0, pct))
+        self.value = value
+
+    def _color(self) -> str:
+        if self.pct < 70:
+            return "green"
+        if self.pct < 90:
+            return "yellow"
+        return "red"
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        width = options.max_width
+        if width <= 0:
+            yield Text("")
+            return
+        filled = int(self.pct / 100 * width + 0.5)
+        text = self.value[:width]
+        text_start = (width - len(text)) // 2
+        text_end = text_start + len(text)
+        color = self._color()
+
+        text_color_on_filled = "black" if color == "yellow" else "white"
+        result = Text()
+        for i in range(width):
+            char = text[i - text_start] if text_start <= i < text_end else " "
+            if i < filled:
+                result.append(char, style=f"bold {text_color_on_filled} on {color}")
+            else:
+                result.append(char, style=f"bold {color} on grey23")
+        yield result
+
+    def __rich_measure__(self, console: Console, options: ConsoleOptions) -> Measurement:
+        floor = min(options.max_width, len(self.value) + 4)
+        return Measurement(floor, options.max_width)
 
 
-def _usage_cell(metric: Metric) -> Text:
+def _usage_cell(metric: Metric):
     if metric.pct is None:
         return Text(metric.value)
-    pct = max(0.0, min(100.0, metric.pct))
-    filled = round(pct / 100 * _BAR_WIDTH)
-    color = "green" if pct < 70 else "yellow" if pct < 90 else "red"
-    return Text.assemble(
-        ("█" * filled, color),
-        ("░" * (_BAR_WIDTH - filled), "dim"),
-        (f" {metric.value}", color),
-    )
+    return _UsageBar(metric.pct, metric.value)
 
 
 def render_table(statuses: list[ProviderStatus]) -> Table:
@@ -237,18 +268,12 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
         title_style="bold",
         show_header=True,
         header_style="bold cyan",
-        expand=False,
+        expand=True,
     )
     table.add_column("Provider", no_wrap=True)
     table.add_column("Status", no_wrap=True)
     table.add_column("Window", no_wrap=True)
-    table.add_column(
-        "Usage",
-        no_wrap=True,
-        min_width=_BAR_WIDTH + 12,
-        max_width=_BAR_WIDTH + 12,
-        overflow="ellipsis",
-    )
+    table.add_column("Usage", no_wrap=True, ratio=1, overflow="ellipsis")
     table.add_column("Reset", justify="right", no_wrap=True)
 
     last_idx = len(statuses) - 1
