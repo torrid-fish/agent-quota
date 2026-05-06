@@ -1,6 +1,6 @@
 # agent-quota
 
-One command, terminal tables for your current quota across **Claude**, **OpenAI Codex**, **GitHub Copilot**, **OpenCode Zen**, **OpenCode Go**, and **Z.ai**.
+One command, terminal tables for your current quota across **Claude**, **OpenAI Codex**, **GitHub Copilot**, **OpenCode Zen**, **OpenCode Go**, **Z.ai**, **OpenRouter**, and **DeepSeek**.
 
 ```
                               Usage-Based Limits
@@ -68,7 +68,7 @@ The first time you run `agent-quota` without a config file, it prompts you to pi
 enabled = ["claude", "codex", "copilot"]
 ```
 
-Re-run `agent-quota setup` any time to change the selection. Pass `--only` to override the config for a single invocation. If stdin/stdout aren't a TTY (e.g. running from cron or piped), agent-quota skips the prompt and falls back to all providers so non-interactive use still works.
+For API-auth providers, `agent-quota setup` also offers to collect the key inline and writes the matching per-provider config file for you. Re-run `agent-quota setup` any time to change the selection or update saved keys. Pass `--only` to override the config for a single invocation. If stdin/stdout aren't a TTY (e.g. running from cron or piped), agent-quota skips the prompt and falls back to all providers so non-interactive use still works.
 
 ## Auth per provider
 
@@ -79,8 +79,12 @@ Re-run `agent-quota setup` any time to change the selection. Pass `--only` to ov
 | Zen | Browser cookies | Be logged into [opencode.ai](https://opencode.ai/zen) |
 | Copilot | GitHub PAT *or* browser cookies | Token in `~/.config/agent-quota/copilot.conf`, **or** be logged into github.com (org-managed Copilot) |
 | Z.ai | API token (JWT) | Token in `~/.config/agent-quota/zai.conf` |
+| OpenRouter | Management key | Key in `~/.config/agent-quota/openrouter.conf` |
+| DeepSeek | API key | Key in `~/.config/agent-quota/deepseek.conf` |
 
 Supported cookie sources: `chrome`, `chromium`, `brave`, `edge`, `firefox`, `helium`. The first one that has a valid session wins. Override order with `--browser <name>` (repeatable).
+
+For `Copilot`, `Z.ai`, `OpenRouter`, and `DeepSeek`, setup will prompt for the token/key when you enable the provider. You can still edit the corresponding `~/.config/agent-quota/*.conf` file manually later.
 
 ### Copilot config
 
@@ -101,6 +105,22 @@ ZAI_TOKEN=eyJ...              # JWT from DevTools (Network tab → api.z.ai → 
 
 The Z.ai JWT can't be auto-refreshed; if it expires, copy a fresh one from DevTools.
 
+### OpenRouter config
+
+```ini
+# ~/.config/agent-quota/openrouter.conf
+OPENROUTER_API_KEY=sk-or-...
+```
+
+OpenRouter documents `GET /api/v1/credits` against a management key, so use a key with access to the credits endpoint.
+
+### DeepSeek config
+
+```ini
+# ~/.config/agent-quota/deepseek.conf
+DEEPSEEK_API_KEY=sk-...
+```
+
 ## Caching
 
 Results are cached in `~/.cache/agent-quota/<provider>.json` (TTL: 60s, Z.ai 120s). Concurrent runs (e.g. `--watch` + a one-shot) coordinate via `.updating` marker files.
@@ -116,6 +136,8 @@ uv run python -m providers.copilot
 uv run python -m providers.zai
 uv run python -m providers.zen
 uv run python -m providers.go
+uv run python -m providers.openrouter
+uv run python -m providers.deepseek
 ```
 
 These are useful for diagnosing a specific provider in isolation.

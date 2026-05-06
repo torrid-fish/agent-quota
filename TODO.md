@@ -11,10 +11,10 @@ The adapter should emit a single `Metric(label, value)` with no `pct`.
 
 ## Tier 1 — clean public balance APIs (start here)
 
-- [ ] **OpenRouter** — `GET /api/v1/credits`, `Authorization: Bearer <key>`.
+- [x] **OpenRouter** — `GET /api/v1/credits`, `Authorization: Bearer <key>`.
   Returns `total_credits` and `total_usage`. Token-in-config-file auth, no
   Cloudflare, no scraping. Mirror `providers/zai.py` shape.
-- [ ] **DeepSeek** — `GET https://api.deepseek.com/user/balance`,
+- [x] **DeepSeek** — `GET https://api.deepseek.com/user/balance`,
   `Authorization: Bearer <key>`. Returns currency + available balance.
   Trivial; same shape as OpenRouter.
 

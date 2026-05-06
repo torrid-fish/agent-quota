@@ -15,7 +15,7 @@ from typing import Callable
 from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.live import Live
 from rich.measure import Measurement
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
 
@@ -29,6 +29,9 @@ class ProviderMeta:
     name: str
     desc: str
     mode: str  # usage | payg
+    secret_key: str | None = None
+    secret_path: Path | None = None
+    secret_label: str | None = None
 
 
 # Static metadata used by setup/picker. Keep ordered — setup walks this dict
@@ -44,11 +47,37 @@ PROVIDER_META: dict[str, ProviderMeta] = {
         "Copilot",
         "GitHub Copilot premium requests (PAT or browser cookies)",
         "usage",
+        "GITHUB_TOKEN",
+        Path("~/.config/agent-quota/copilot.conf").expanduser(),
+        "GitHub PAT",
     ),
-    "zai": ProviderMeta("Z.ai", "Z.ai 5h tokens / monthly tools (API token)", "usage"),
+    "zai": ProviderMeta(
+        "Z.ai",
+        "Z.ai 5h tokens / monthly tools (API token)",
+        "usage",
+        "ZAI_TOKEN",
+        Path("~/.config/agent-quota/zai.conf").expanduser(),
+        "Z.ai API token",
+    ),
     "zen": ProviderMeta("OpenCode Zen", "OpenCode Zen balance (browser cookies)", "payg"),
     "go": ProviderMeta(
         "OpenCode Go", "OpenCode Go 5h / weekly / monthly usage (browser cookies)", "usage"
+    ),
+    "openrouter": ProviderMeta(
+        "OpenRouter",
+        "OpenRouter prepaid credits (management key)",
+        "payg",
+        "OPENROUTER_API_KEY",
+        Path("~/.config/agent-quota/openrouter.conf").expanduser(),
+        "OpenRouter management key",
+    ),
+    "deepseek": ProviderMeta(
+        "DeepSeek",
+        "DeepSeek API balance (API key)",
+        "payg",
+        "DEEPSEEK_API_KEY",
+        Path("~/.config/agent-quota/deepseek.conf").expanduser(),
+        "DeepSeek API key",
     ),
 }
 
@@ -193,6 +222,39 @@ def _adapt_go(raw: dict) -> list[Metric]:
     return metrics
 
 
+def _adapt_openrouter(raw: dict) -> list[Metric]:
+    remaining = float(raw.get("remaining_credits", 0.0))
+    total = float(raw.get("total_credits", 0.0))
+    used = float(raw.get("total_usage", 0.0))
+    return [
+        Metric(
+            "Credits",
+            f"${remaining:.2f} remaining (${used:.2f} / ${total:.2f} used)",
+            None,
+            "—",
+        )
+    ]
+
+
+def _adapt_deepseek(raw: dict) -> list[Metric]:
+    balances = raw.get("balances") or []
+    metrics: list[Metric] = []
+    for item in balances:
+        currency = str(item.get("currency") or "?")
+        total = str(item.get("total_balance") or "0")
+        granted = str(item.get("granted_balance") or "0")
+        topped_up = str(item.get("topped_up_balance") or "0")
+        metrics.append(
+            Metric(
+                currency,
+                f"{total} total ({granted} granted, {topped_up} topped up)",
+                None,
+                "—",
+            )
+        )
+    return metrics
+
+
 # ===== Fetchers (lazy import so a missing optional dep doesn't kill the whole tool) =====
 
 
@@ -237,6 +299,30 @@ def _fetch_go(browsers):
     return get_go_usage(browsers)
 
 
+def _fetch_openrouter(browsers):
+    from providers.openrouter import get_openrouter_balance, load_openrouter_config
+
+    cfg = load_openrouter_config()
+    token = cfg.get("OPENROUTER_API_KEY")
+    if not token:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY not set in ~/.config/agent-quota/openrouter.conf"
+        )
+    return get_openrouter_balance(token)
+
+
+def _fetch_deepseek(browsers):
+    from providers.deepseek import get_deepseek_balance, load_deepseek_config
+
+    cfg = load_deepseek_config()
+    token = cfg.get("DEEPSEEK_API_KEY")
+    if not token:
+        raise RuntimeError(
+            "DEEPSEEK_API_KEY not set in ~/.config/agent-quota/deepseek.conf"
+        )
+    return get_deepseek_balance(token)
+
+
 @dataclass
 class _Provider:
     name: str
@@ -258,6 +344,8 @@ def _build_providers() -> dict[str, _Provider]:
         "zai": _adapt_zai,
         "zen": _adapt_zen,
         "go": _adapt_go,
+        "openrouter": _adapt_openrouter,
+        "deepseek": _adapt_deepseek,
     }
     fetchers = {
         "claude": _fetch_claude,
@@ -266,6 +354,8 @@ def _build_providers() -> dict[str, _Provider]:
         "zai": _fetch_zai,
         "zen": _fetch_zen,
         "go": _fetch_go,
+        "openrouter": _fetch_openrouter,
+        "deepseek": _fetch_deepseek,
     }
     return {
         key: _Provider(
@@ -306,6 +396,58 @@ def save_config(enabled: list[str]) -> None:
     )
 
 
+def _load_secret_value(path: Path, key: str) -> str | None:
+    if not path.exists():
+        return None
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        found_key, _, value = line.partition("=")
+        if found_key.strip() == key:
+            value = value.strip()
+            return value or None
+    return None
+
+
+def _save_secret_value(path: Path, key: str, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"# agent-quota provider credentials\n"
+        f"{key}={value}\n"
+    )
+
+
+def _maybe_prompt_for_provider_secret(console: Console, meta: ProviderMeta) -> None:
+    if not meta.secret_key or not meta.secret_path or not meta.secret_label:
+        return
+
+    existing = _load_secret_value(meta.secret_path, meta.secret_key)
+    if existing:
+        if not Confirm.ask(
+            f"  Update saved {meta.secret_label}?",
+            default=False,
+        ):
+            return
+    else:
+        if not Confirm.ask(
+            f"  Enter {meta.secret_label} now?",
+            default=True,
+        ):
+            return
+
+    value = Prompt.ask(
+        f"  {meta.secret_key}",
+        password=True,
+    ).strip()
+    if not value:
+        console.print("  [yellow]Skipped empty secret.[/]")
+        return
+
+    _save_secret_value(meta.secret_path, meta.secret_key, value)
+    console.print(f"  [green]✓ saved[/] [dim]{meta.secret_path}[/]")
+
+
 def run_setup() -> int:
     """Interactive picker for enabled providers. Writes config.toml and returns 0."""
     console = Console()
@@ -324,6 +466,7 @@ def run_setup() -> int:
         console.print(f"  [bold]{name:<8}[/]  [dim]{desc}[/]")
         if Confirm.ask(f"  Enable {name}?", default=key in existing):
             enabled.append(key)
+            _maybe_prompt_for_provider_secret(console, meta)
         console.print()
 
     if not enabled:
@@ -643,7 +786,7 @@ def main() -> int:
     parser.add_argument(
         "--only",
         metavar="LIST",
-        help="Comma-separated providers (overrides config). Known: claude,codex,copilot,zai,zen,go",
+        help="Comma-separated providers (overrides config). Known: claude,codex,copilot,zai,zen,go,openrouter,deepseek",
     )
     parser.add_argument(
         "--watch",
