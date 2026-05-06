@@ -33,6 +33,68 @@ _WORKSPACE_RE = re.compile(r"/workspace/(wrk_[A-Za-z0-9]+)")
 _WINDOW_KEYS = ("rollingUsage", "weeklyUsage", "monthlyUsage")
 
 
+def _find_nested_value(raw: object, keys: set[str]) -> object | None:
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if str(key).lower() in keys and value not in (None, ""):
+                return value
+        for value in raw.values():
+            found = _find_nested_value(value, keys)
+            if found not in (None, ""):
+                return found
+    elif isinstance(raw, list):
+        for item in raw:
+            found = _find_nested_value(item, keys)
+            if found not in (None, ""):
+                return found
+    return None
+
+
+def _iter_dicts(raw: object):
+    # Legacy helper kept for future parsing needs.
+    if isinstance(raw, dict):
+        yield raw
+        for v in raw.values():
+            yield from _iter_dicts(v)
+    elif isinstance(raw, list):
+        for item in raw:
+            yield from _iter_dicts(item)
+
+
+def _extract_go_identity_from_html(html: str, workspace_id: str) -> dict:
+    # OpenCode pages embed a lightweight inline state (not __NEXT_DATA__).
+    # Workspace name is available in a `workspaces[]` object.
+    team_name = ""
+    m = re.search(
+        rf'\{{\s*id:\s*"{re.escape(workspace_id)}"\s*,\s*name:\s*"([^"]+)"',
+        html,
+    )
+    if m:
+        team_name = m.group(1).strip()
+
+    # User email is keyed by workspace id, but the resolved value is written
+    # later via $R[...] calls. Capture any email close to the key.
+    account_name = ""
+    key_idx = html.find(f'userEmail[\\"{workspace_id}\\"]')
+    if key_idx != -1:
+        snippet = html[key_idx : key_idx + 2400]
+        m2 = re.search(
+            r'([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})',
+            snippet,
+        )
+        if m2:
+            account_name = m2.group(1)
+
+    return {
+        "plan": "",
+        "team_name": team_name,
+        "organization_id": workspace_id,
+        "user_name": "",
+        "account_name": account_name,
+        "source": "inline_state",
+    }
+
+
 def _resolve_workspace(cookies: dict) -> str:
     """Hit /auth, follow the redirect, and pull the workspace id from the URL."""
     resp = requests.get(
@@ -113,7 +175,8 @@ def _fetch_go_usage_uncached(browsers: list[str] | None = None) -> dict:
                     "Could not parse usage windows on /go. "
                     "Is OpenCode Go enabled for this workspace?"
                 )
-            return {"workspace": ws_id, "windows": windows}
+            identity = _extract_go_identity_from_html(resp.text, ws_id)
+            return {"workspace": ws_id, "windows": windows, "identity": identity}
         except Exception as e:
             last_error = e
             if attempt == 0:
@@ -123,12 +186,28 @@ def _fetch_go_usage_uncached(browsers: list[str] | None = None) -> dict:
 
 
 def get_go_usage(browsers: list[str] | None = None) -> dict:
-    return get_cached_or_fetch(
+    data = get_cached_or_fetch(
         "go", lambda: _fetch_go_usage_uncached(browsers), ttl=CACHE_TTL
     )
+    if isinstance(data, dict) and not isinstance(data.get("identity"), dict):
+        # Refresh immediately when a pre-identity cache entry is still fresh.
+        data = get_cached_or_fetch(
+            "go", lambda: _fetch_go_usage_uncached(browsers), ttl=0
+        )
+    return data
 
 
 def print_cli(usage: dict) -> None:
+    identity = usage.get("identity") if isinstance(usage, dict) else None
+    if isinstance(identity, dict):
+        plan = identity.get("plan") or "Unknown"
+        team = identity.get("team_name")
+        user = identity.get("user_name") or identity.get("account_name") or "Unknown"
+        print(f"Plan              : {plan}")
+        if team:
+            print(f"Team              : {team}")
+        print(f"User              : {user}")
+
     rows = [
         ("5h", "rollingUsage"),
         ("Weekly", "weeklyUsage"),

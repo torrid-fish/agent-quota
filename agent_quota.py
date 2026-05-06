@@ -60,7 +60,7 @@ PROVIDER_META: dict[str, ProviderMeta] = {
         "Z.ai API token",
     ),
     "go": ProviderMeta(
-        "OpenCode Go",
+        "OpenCode",
         "OpenCode Go 5h / weekly / monthly subscription usage (browser cookies)",
         "usage",
     ),
@@ -352,8 +352,21 @@ def _plan_zai(raw: dict) -> str:
 
 
 def _plan_go(raw: dict) -> str:
-    value = _find_nested_value(raw, {"plan", "plan_type", "subscription", "tier"})
-    return _format_plan_value(value)
+    identity = raw.get("identity") or {}
+    value = identity.get("plan")
+    if value not in (None, ""):
+        return _format_plan_value(value)
+    # OpenCode "Go" is the plan label for this provider.
+    return "Go"
+
+
+def _user_go(raw: dict) -> str:
+    identity = raw.get("identity") or {}
+    return (
+        identity.get("user_name")
+        or identity.get("account_name")
+        or "Unknown"
+    )
 
 
 def _adapt_openrouter(raw: dict) -> list[Metric]:
@@ -499,7 +512,7 @@ def _build_providers() -> dict[str, _Provider]:
         "copilot": _user_copilot,
         "zai": None,
         "zen": None,
-        "go": None,
+        "go": _user_go,
         "openrouter": None,
         "deepseek": None,
     }
