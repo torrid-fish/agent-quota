@@ -1,4 +1,4 @@
-"""agent-quota: show AI provider quotas as a TUI table."""
+"""agent-quota: show subscription, rate-limit, and quota status in terminal tables."""
 
 from __future__ import annotations
 
@@ -38,14 +38,14 @@ class ProviderMeta:
 # in registration order, which is also the table row order within each section.
 PROVIDER_META: dict[str, ProviderMeta] = {
     "claude": ProviderMeta(
-        "Claude", "Claude.ai 5h / 7d quota (browser cookies)", "usage"
+        "Claude", "Claude.ai 5h / 7d subscription windows (browser cookies)", "usage"
     ),
     "codex": ProviderMeta(
-        "Codex", "ChatGPT Codex 5h / weekly quota (browser cookies)", "usage"
+        "Codex", "ChatGPT Codex 5h / weekly included usage (browser cookies)", "usage"
     ),
     "copilot": ProviderMeta(
         "Copilot",
-        "GitHub Copilot premium requests (PAT or browser cookies)",
+        "GitHub Copilot monthly included premium requests (PAT or browser cookies)",
         "usage",
         "GITHUB_TOKEN",
         Path("~/.config/agent-quota/copilot.conf").expanduser(),
@@ -53,19 +53,25 @@ PROVIDER_META: dict[str, ProviderMeta] = {
     ),
     "zai": ProviderMeta(
         "Z.ai",
-        "Z.ai 5h tokens / monthly tools (API token)",
+        "Z.ai 5h token window / monthly tool quota (API token)",
         "usage",
         "ZAI_TOKEN",
         Path("~/.config/agent-quota/zai.conf").expanduser(),
         "Z.ai API token",
     ),
-    "zen": ProviderMeta("OpenCode Zen", "OpenCode Zen balance (browser cookies)", "payg"),
     "go": ProviderMeta(
-        "OpenCode Go", "OpenCode Go 5h / weekly / monthly usage (browser cookies)", "usage"
+        "OpenCode Go",
+        "OpenCode Go 5h / weekly / monthly subscription usage (browser cookies)",
+        "usage",
+    ),
+    "zen": ProviderMeta(
+        "OpenCode Zen",
+        "OpenCode Zen prepaid balance (browser cookies)",
+        "payg",
     ),
     "openrouter": ProviderMeta(
         "OpenRouter",
-        "OpenRouter prepaid credits (management key)",
+        "OpenRouter prepaid credits and balance (management key)",
         "payg",
         "OPENROUTER_API_KEY",
         Path("~/.config/agent-quota/openrouter.conf").expanduser(),
@@ -98,6 +104,8 @@ class ProviderStatus:
     key: str
     name: str
     mode: str
+    plan: str = ""
+    user: str = ""
     state: str = "ok"  # ok | auth_err | net_err
     metrics: list[Metric] = field(default_factory=list)
     error: str = ""
@@ -222,6 +230,102 @@ def _adapt_go(raw: dict) -> list[Metric]:
     return metrics
 
 
+def _find_nested_value(raw, keys: set[str]):
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if str(key).lower() in keys and value not in (None, ""):
+                return value
+        for value in raw.values():
+            found = _find_nested_value(value, keys)
+            if found not in (None, ""):
+                return found
+    elif isinstance(raw, list):
+        for item in raw:
+            found = _find_nested_value(item, keys)
+            if found not in (None, ""):
+                return found
+    return None
+
+
+def _format_plan_value(value) -> str:
+    if value in (None, ""):
+        return "Unknown"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value).strip()
+    if not text:
+        return "Unknown"
+    text = text.replace("_", " ").replace("-", " ")
+    lowered = " ".join(word.lower() for word in text.split())
+    known = {
+        "pro": "Pro",
+        "team": "Team",
+        "plus": "Plus",
+        "free": "Free",
+        "enterprise": "Enterprise",
+        "business": "Business",
+        "individual": "Individual",
+        "personal": "Personal",
+    }
+    if lowered in known:
+        return known[lowered]
+    return " ".join(word.capitalize() for word in text.split())
+
+
+def _plan_claude(raw: dict) -> str:
+    value = _find_nested_value(
+        raw,
+        {"plan", "plan_type", "subscription_plan", "subscription_tier", "tier"},
+    )
+    return _format_plan_value(value)
+
+
+def _plan_codex(raw: dict) -> str:
+    identity = raw.get("identity") or {}
+    value = identity.get("plan")
+    if value in (None, ""):
+        session = raw.get("_session") or {}
+        account = session.get("account") or {}
+        value = raw.get("plan_type") or account.get("planType")
+    plan = _format_plan_value(value)
+    team_name = identity.get("team_name")
+    if plan == "Team" and team_name:
+        return f"Team ({team_name})"
+    return plan
+
+
+def _user_codex(raw: dict) -> str:
+    identity = raw.get("identity") or {}
+    session = raw.get("_session") or {}
+    user = session.get("user") or {}
+    return (
+        identity.get("user_name")
+        or user.get("name")
+        or identity.get("account_name")
+        or user.get("email")
+        or "Unknown"
+    )
+
+
+def _plan_copilot(raw: dict) -> str:
+    value = _find_nested_value(raw, {"plan", "plan_type", "subscription", "tier"})
+    if value not in (None, ""):
+        return _format_plan_value(value)
+    managed_by = (raw.get("raw") or {}).get("managed_by_name")
+    if managed_by:
+        return "Team"
+    return "Unknown"
+
+
+def _plan_zai(raw: dict) -> str:
+    return _format_plan_value(raw.get("level"))
+
+
+def _plan_go(raw: dict) -> str:
+    value = _find_nested_value(raw, {"plan", "plan_type", "subscription", "tier"})
+    return _format_plan_value(value)
+
+
 def _adapt_openrouter(raw: dict) -> list[Metric]:
     remaining = float(raw.get("remaining_credits", 0.0))
     total = float(raw.get("total_credits", 0.0))
@@ -329,6 +433,8 @@ class _Provider:
     mode: str
     fetch: Callable[[list[str] | None], dict]
     adapt: Callable[[dict], list[Metric]]
+    plan: Callable[[dict], str] | None = None
+    user: Callable[[dict], str] | None = None
 
 
 def _build_providers() -> dict[str, _Provider]:
@@ -347,6 +453,26 @@ def _build_providers() -> dict[str, _Provider]:
         "openrouter": _adapt_openrouter,
         "deepseek": _adapt_deepseek,
     }
+    plans = {
+        "claude": _plan_claude,
+        "codex": _plan_codex,
+        "copilot": _plan_copilot,
+        "zai": _plan_zai,
+        "zen": None,
+        "go": _plan_go,
+        "openrouter": None,
+        "deepseek": None,
+    }
+    users = {
+        "claude": None,
+        "codex": _user_codex,
+        "copilot": None,
+        "zai": None,
+        "zen": None,
+        "go": None,
+        "openrouter": None,
+        "deepseek": None,
+    }
     fetchers = {
         "claude": _fetch_claude,
         "codex": _fetch_codex,
@@ -363,6 +489,8 @@ def _build_providers() -> dict[str, _Provider]:
             mode=meta.mode,
             fetch=fetchers[key],
             adapt=adapters[key],
+            plan=plans[key],
+            user=users[key],
         )
         for key, meta in PROVIDER_META.items()
     }
@@ -454,7 +582,7 @@ def run_setup() -> int:
     console.print()
     console.rule("[bold]agent-quota setup[/]")
     console.print(
-        "Pick which providers to monitor. Re-run "
+        "Pick which providers to monitor. Subscription and rate-limit providers are listed first. Re-run "
         "[cyan]agent-quota setup[/] later to change.\n"
     )
 
@@ -544,6 +672,10 @@ def fetch_one(key: str, prov: _Provider, browsers: list[str] | None) -> Provider
         return status
     try:
         status.metrics = prov.adapt(raw)
+        if prov.plan:
+            status.plan = prov.plan(raw)
+        if prov.user:
+            status.user = prov.user(raw)
     except Exception as exc:
         status.state = "net_err"
         status.error = f"adapter: {exc}"
@@ -633,13 +765,14 @@ def _render_table(
         header_style="bold cyan",
         expand=True,
     )
-    # vertical="middle" lets the single-line Provider/Status/Reset cells sit
+    # vertical="middle" lets the single-line Provider/Plan/User/Reset cells sit
     # centered next to multi-line Window/Usage cells when a provider has
     # multiple metrics (e.g. Claude's 5h + 7d).
     table.add_column(
         Text("Provider", justify="center"), no_wrap=True, vertical="middle"
     )
-    table.add_column(Text("Status", justify="center"), no_wrap=True, vertical="middle")
+    table.add_column(Text("Plan", justify="center"), no_wrap=True, vertical="middle")
+    table.add_column(Text("User", justify="center"), no_wrap=True, vertical="middle")
     table.add_column(
         Text(label_header, justify="center"), no_wrap=True, vertical="middle"
     )
@@ -667,6 +800,7 @@ def _render_table(
                 s.name,
                 state,
                 "—",
+                "—",
                 Text(s.error or "(no detail)", style="dim"),
                 "—",
                 end_section=end_section,
@@ -675,7 +809,8 @@ def _render_table(
         if not s.metrics:
             table.add_row(
                 s.name,
-                state,
+                s.plan or "Unknown",
+                s.user or "—",
                 "—",
                 Text("no data", style="dim"),
                 "—",
@@ -693,9 +828,16 @@ def _render_table(
         resets = Text("\n".join(m.reset for m in s.metrics))
         usage = Group(*(_usage_cell(m) for m in s.metrics))
         name_cell = Text(pad + s.name)
-        state_cell = Text(pad) + state
+        plan_cell = Text(pad + (s.plan or "Unknown"))
+        user_cell = Text(pad + (s.user or "—"))
         table.add_row(
-            name_cell, state_cell, windows, usage, resets, end_section=end_section
+            name_cell,
+            plan_cell,
+            user_cell,
+            windows,
+            usage,
+            resets,
+            end_section=end_section,
         )
     return table
 
@@ -781,7 +923,7 @@ def render_tables(statuses: list[ProviderStatus]):
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="agent-quota",
-        description="Show AI provider quotas in a TUI table.",
+        description="Show subscription and rate-limit usage for AI products in terminal tables.",
     )
     parser.add_argument(
         "--only",

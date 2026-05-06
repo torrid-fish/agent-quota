@@ -21,6 +21,36 @@ CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 
 # ================= Network Logic =================
 
+
+def _extract_codex_identity(usage_data: dict, session_data: dict) -> dict:
+    account = session_data.get("account") or {}
+    user = session_data.get("user") or {}
+    team_name = (
+        account.get("name")
+        or account.get("displayName")
+        or account.get("organizationName")
+        or account.get("workspaceName")
+    )
+    return {
+        "plan": usage_data.get("plan_type") or account.get("planType"),
+        "team_name": team_name or "",
+        "organization_id": account.get("organizationId") or "",
+        "user_name": user.get("name") or "",
+        "account_name": user.get("email") or usage_data.get("email") or "",
+        "account_kind": account.get("structure") or "",
+    }
+
+
+def extract_codex_identity(raw: dict) -> dict:
+    identity = raw.get("identity")
+    merged = dict(identity) if isinstance(identity, dict) else {}
+    fresh = _extract_codex_identity(raw, raw.get("_session") or {})
+    for key, value in fresh.items():
+        if value not in (None, ""):
+            merged[key] = value
+    return merged
+
+
 def _fetch_codex_usage_uncached(browsers: list[str] | None = None) -> dict:
     """Internal function to fetch Codex usage data without caching"""
     try:
@@ -64,7 +94,13 @@ def _fetch_codex_usage_uncached(browsers: list[str] | None = None) -> dict:
             )
 
             usage_resp.raise_for_status()
-            return usage_resp.json()
+            usage_data = usage_resp.json()
+            if isinstance(usage_data, dict):
+                usage_data["_session"] = session_data
+                usage_data["identity"] = _extract_codex_identity(
+                    usage_data, session_data
+                )
+            return usage_data
 
         except Exception as e:
             last_error = e
@@ -92,7 +128,15 @@ def print_cli(usage: dict) -> None:
     rate = usage.get("rate_limit") or {}
     p = parse_window_direct(rate.get("primary_window"))
     s = parse_window_direct(rate.get("secondary_window"))
+    identity = extract_codex_identity(usage)
 
+    print(f"Plan              : {identity.get('plan') or 'Unknown'}")
+    if identity.get("team_name"):
+        print(f"Team              : {identity['team_name']}")
+    print(
+        f"User              : "
+        f"{identity.get('user_name') or identity.get('account_name') or 'Unknown'}"
+    )
     print(f"Primary   (Short): {p.utilization:>5.1f}% | Reset in {format_eta(p.resets_at)}")
     print(f"Secondary (Long) : {s.utilization:>5.1f}% | Reset in {format_eta(s.resets_at)}")
 

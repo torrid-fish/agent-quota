@@ -8,8 +8,9 @@ A terminal app (`agent-quota`) that prints current quota across **Claude, OpenAI
 
 ## Mental model
 
-- `agent_quota.py` is the orchestrator: imports each provider's `get_*_usage()` / `get_*_quota()` directly, runs them in parallel via `ThreadPoolExecutor`, normalizes results into `ProviderStatus(metrics: list[Metric], mode: str)`, and renders one or two Rich tables depending on which provider categories are selected.
+- `agent_quota.py` is the orchestrator: imports each provider's `get_*_usage()` / `get_*_quota()` directly, runs them in parallel via `ThreadPoolExecutor`, normalizes results into `ProviderStatus(metrics: list[Metric], mode: str)` plus optional subscription metadata (`plan`, `user`), and renders one or two Rich tables depending on which provider categories are selected.
 - Providers are classified in `PROVIDER_META` as either `usage` or `payg`. That classification drives setup copy, row grouping, and which table a provider appears in.
+- The usage table currently has `Provider`, `Plan`, `User`, `Window`, `Usage`, and `Reset` columns. `Plan`/`User` are provider metadata fields, not derived from the bar itself. `Codex` currently has the best support here because its session payload exposes `plan_type`, the signed-in user name, and account structure. Other providers may still render `Unknown` / `—` until a provider-specific identity extractor exists.
 - The Usage / Quota value cell is **not** a Rich primitive when `Metric.pct` is present — it's a custom renderable `_UsageBar` that implements `__rich_console__` + `__rich_measure__`. At render time Rich passes the column's allocated width via `options.max_width`, and `_UsageBar` paints a coloured bar (white-on-colour for filled, colour-on-grey23 for empty) with the metric value text centred across both portions. This is why `Metric` carries both `pct` (drives bar fill) and `value` (drives the overlay text) — the adapters in `agent_quota.py` shape the value text per provider so it's meaningful when overlaid (e.g. `"30%"`, `"0 / 300"`, `"1.2K / 5.0M"`). Metrics without `pct` render as plain text, which is how pay-as-you-go balances such as Zen currently display.
 - Six provider scripts live under `providers/` (`claude.py`, `codex.py`, `copilot.py`, `zen.py`, `go.py`, `zai.py`). Each one is data-fetch + a tiny `print_cli()` debug `main()`. They depend only on `common.py` (which sits at the repo root, not inside the package, since it's shared with `agent_quota.py`).
 - `common.py` is the contract layer: `load_cookies` (multi-browser fallback), `get_cached_or_fetch` (file cache + cross-process `.updating` marker), `format_eta`, `parse_window_*`.
@@ -32,7 +33,7 @@ A provider script never imports another provider. The orchestrator (`agent_quota
 
 A provider script must:
 
-1. Expose a `get_<name>_usage()` (or `_quota()` / `_balance()`) function returning a `dict`. Adapters in `agent_quota.py` consume that dict.
+1. Expose a `get_<name>_usage()` (or `_quota()` / `_balance()`) function returning a `dict`. Adapters in `agent_quota.py` consume that dict. If the provider exposes account/session metadata, include a normalized `identity` block when practical so `Plan` / `User` can be rendered without heuristic guessing.
 2. Wrap the network call in `get_cached_or_fetch("<name>", fetch_fn, ttl=...)` from `common.py`.
 3. Read its config (if any) from `~/.config/agent-quota/<name>.conf` via a `load_<name>_config()` function.
 4. Provide a `print_cli()` and a thin `main()` for standalone debugging — *not* called from the TUI; the TUI only calls the data-fetch functions.

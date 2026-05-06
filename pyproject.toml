@@ -1,7 +1,7 @@
 [project]
 name = "agent-quota"
 version = "0.1.0"
-description = "TUI to show Claude, Codex, GitHub Copilot, OpenCode Zen, OpenCode Go, and Z.ai quotas in one command"
+description = "Terminal quota tracker for subscription and rate-limited AI products, with optional balance views"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
