@@ -16,7 +16,7 @@ from common import format_eta, get_cached_or_fetch, load_cookies
 
 # ==================== Configuration ====================
 
-CONFIG_PATH = Path("~/.config/waybar-ai-usage/copilot.conf").expanduser()
+CONFIG_PATH = Path("~/.config/agent-quota/copilot.conf").expanduser()
 DEFAULT_QUOTA = 300
 GITHUB_API_BASE = "https://api.github.com"
 COPILOT_FEATURES_URL = "https://github.com/settings/copilot/features"
@@ -66,7 +66,7 @@ def _github_get(url: str, token: str) -> dict | list:
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "waybar-ai-usage/copilot",
+            "User-Agent": "agent-quota/copilot",
         },
     )
     try:

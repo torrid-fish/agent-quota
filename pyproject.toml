@@ -1,16 +1,17 @@
 [project]
-name = "waybar-ai-usage"
-version = "0.7.1"
-description = "Monitor Claude, ChatGPT, GitHub Copilot, OpenCode Zen, and Z.ai usage in Waybar"
+name = "agent-quota"
+version = "0.1.0"
+description = "TUI to show Claude, Codex, GitHub Copilot, OpenCode Zen, and Z.ai quotas in one command"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-keywords = ["waybar", "claude", "chatgpt", "openai", "copilot", "github", "usage", "monitor", "opencode", "zen", "zai"]
+keywords = ["claude", "chatgpt", "codex", "copilot", "github", "usage", "monitor", "opencode", "zen", "zai", "tui"]
 authors = [
-    { name = "NihilDigit" }
+    { name = "torrid-fish" }
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -21,26 +22,18 @@ classifiers = [
 dependencies = [
     "browser-cookie3>=0.20.1",
     "curl-cffi>=0.13.0",
+    "rich>=13.7.0",
 ]
 
-[project.urls]
-Homepage = "https://github.com/NihilDigit/waybar-ai-usage"
-Repository = "https://github.com/NihilDigit/waybar-ai-usage"
-Issues = "https://github.com/NihilDigit/waybar-ai-usage/issues"
-
 [project.scripts]
-claude-usage = "claude:main"
-codex-usage = "codex:main"
-copilot-usage = "copilot:main"
-zen-balance = "zen:main"
-zai-usage = "zai:main"
+agent-quota = "agent_quota:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["claude.py", "codex.py", "copilot.py", "zen.py", "zai.py", "common.py"]
+packages = ["agent_quota.py", "claude.py", "codex.py", "copilot.py", "zen.py", "zai.py", "common.py"]
 
 [dependency-groups]
 dev = []

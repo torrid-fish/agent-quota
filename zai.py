@@ -11,7 +11,7 @@ from common import format_eta, get_cached_or_fetch
 
 # ==================== Configuration ====================
 
-CONFIG_PATH = Path("~/.config/waybar-ai-usage/zai.conf").expanduser()
+CONFIG_PATH = Path("~/.config/agent-quota/zai.conf").expanduser()
 API_BASE = "https://api.z.ai"
 QUOTA_URL = f"{API_BASE}/api/monitor/usage/quota/limit"
 
@@ -46,7 +46,7 @@ def _api_get(url: str, token: str) -> dict:
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
-            "User-Agent": "waybar-ai-usage/zai",
+            "User-Agent": "agent-quota/zai",
         },
     )
     try:

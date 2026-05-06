@@ -18,7 +18,7 @@ DEFAULT_BROWSERS = ("chrome", "chromium", "brave", "edge", "firefox", "helium")
 
 
 # Cache configuration
-CACHE_DIR = Path.home() / ".cache" / "waybar-ai-usage"
+CACHE_DIR = Path.home() / ".cache" / "agent-quota"
 CACHE_TTL = 60  # Cache valid for 60 seconds
 
 
