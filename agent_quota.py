@@ -117,15 +117,16 @@ class ProviderStatus:
 def _pad_reset(eta_str: str) -> str:
     """Pad ETA string to fixed width with zero-padding on numbers (e.g., '1h01m' -> '01h01m', '1d' -> '01d', '4d21h' -> '04d21h')."""
     import re
+
     if eta_str == "—" or eta_str.startswith("0′"):
         return eta_str
-    match = re.match(r'^(\d+)([a-z])(\d*)([a-z]?)$', eta_str)
+    match = re.match(r"^(\d+)([a-z])(\d*)([a-z]?)$", eta_str)
     if not match:
         return eta_str
     val1, unit1, val2, unit2 = match.groups()
     val1 = int(val1)
     val2 = int(val2) if val2 else 0
-    
+
     if unit1 == "d":
         suffix = f"{val2:02d}{unit2}" if val2 else ""
         return f"{val1:02d}d{suffix}"
@@ -169,10 +170,12 @@ def _adapt_codex(raw: dict) -> list[Metric]:
 
 
 def _copilot_reset() -> str:
-     # Premium quota refills at the start of each calendar month (UTC).
-     now = datetime.now(timezone.utc)
-     year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
-     return _pad_reset(format_eta(datetime(year, month, 1, tzinfo=timezone.utc).isoformat()))
+    # Premium quota refills at the start of each calendar month (UTC).
+    now = datetime.now(timezone.utc)
+    year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
+    return _pad_reset(
+        format_eta(datetime(year, month, 1, tzinfo=timezone.utc).isoformat())
+    )
 
 
 def _adapt_copilot_factory(quota: int):
@@ -199,9 +202,9 @@ def _fmt_tokens(v: float | int) -> str:
 
 
 def _ms_reset(ms: int | None) -> str:
-     if not ms:
-         return "—"
-     return _pad_reset(format_eta(ms // 1000))
+    if not ms:
+        return "—"
+    return _pad_reset(format_eta(ms // 1000))
 
 
 def _adapt_zai(raw: dict) -> list[Metric]:
@@ -233,24 +236,24 @@ def _adapt_zen(raw: dict) -> list[Metric]:
 
 
 def _adapt_go(raw: dict) -> list[Metric]:
-     rows = [
-         ("5h", "rollingUsage"),
-         ("Weekly", "weeklyUsage"),
-         ("Monthly", "monthlyUsage"),
-     ]
-     windows = raw.get("windows") or {}
-     metrics: list[Metric] = []
-     for label, key in rows:
-         w = windows.get(key)
-         if not w:
-             continue
-         pct = float(w["usage_percent"])
-         if pct == 0 or not w["reset_in_sec"]:
-             reset = "—"
-         else:
-             reset = _pad_reset(format_eta(time.time() + w["reset_in_sec"]))
-         metrics.append(Metric(label, f"{pct:.0f}%", pct, reset))
-     return metrics
+    rows = [
+        ("5h", "rollingUsage"),
+        ("Weekly", "weeklyUsage"),
+        ("Monthly", "monthlyUsage"),
+    ]
+    windows = raw.get("windows") or {}
+    metrics: list[Metric] = []
+    for label, key in rows:
+        w = windows.get(key)
+        if not w:
+            continue
+        pct = float(w["usage_percent"])
+        if pct == 0 or not w["reset_in_sec"]:
+            reset = "—"
+        else:
+            reset = _pad_reset(format_eta(time.time() + w["reset_in_sec"]))
+        metrics.append(Metric(label, f"{pct:.0f}%", pct, reset))
+    return metrics
 
 
 def _find_nested_value(raw, keys: set[str]):
@@ -313,11 +316,7 @@ def _plan_claude(raw: dict) -> str:
 
 def _user_claude(raw: dict) -> str:
     identity = raw.get("identity") or {}
-    return (
-        identity.get("user_name")
-        or identity.get("account_name")
-        or "Unknown"
-    )
+    return identity.get("user_name") or identity.get("account_name") or "Unknown"
 
 
 def _plan_codex(raw: dict) -> str:
@@ -385,21 +384,17 @@ def _plan_go(raw: dict) -> str:
 
 def _user_go(raw: dict) -> str:
     identity = raw.get("identity") or {}
-    return (
-        identity.get("user_name")
-        or identity.get("account_name")
-        or "Unknown"
-    )
+    return identity.get("user_name") or identity.get("account_name") or "Unknown"
 
 
 def _adapt_openrouter(raw: dict) -> list[Metric]:
     remaining = float(raw.get("remaining_credits", 0.0))
-    total = float(raw.get("total_credits", 0.0))
-    used = float(raw.get("total_usage", 0.0))
+    # total = float(raw.get("total_credits", 0.0))
+    # used = float(raw.get("total_usage", 0.0))
     return [
         Metric(
             "Credits",
-            f"${remaining:.2f} remaining (${used:.2f} / ${total:.2f} used)",
+            f"${remaining:.2f}",
             None,
             "—",
         )
@@ -606,10 +601,7 @@ def _load_secret_value(path: Path, key: str) -> str | None:
 
 def _save_secret_value(path: Path, key: str, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f"# agent-quota provider credentials\n"
-        f"{key}={value}\n"
-    )
+    path.write_text(f"# agent-quota provider credentials\n{key}={value}\n")
 
 
 def _maybe_prompt_for_provider_secret(console: Console, meta: ProviderMeta) -> None:
@@ -1011,9 +1003,7 @@ def _render_payg_table(statuses: list[ProviderStatus]) -> Table:
         if len(s.metrics) == 1:
             quota_cell = Text(s.metrics[0].value)
         else:
-            quota_cell = Text(
-                "\n".join(f"{m.label}  {m.value}" for m in s.metrics)
-            )
+            quota_cell = Text("\n".join(f"{m.label}  {m.value}" for m in s.metrics))
         table.add_row(s.name, quota_cell, end_section=end_section)
     return table
 
@@ -1059,6 +1049,12 @@ def main() -> int:
         help="Comma-separated providers (overrides config). Known: claude,codex,copilot,zai,zen,go,openrouter,deepseek",
     )
     parser.add_argument(
+        "--view",
+        choices=("usage", "payg", "both"),
+        default="both",
+        help="Which table(s) to render: 'usage' (usage-based limits), 'payg' (pay-as-you-go quota), or 'both' (default).",
+    )
+    parser.add_argument(
         "--watch",
         type=int,
         nargs="?",
@@ -1085,6 +1081,14 @@ def main() -> int:
     if keys is None:
         return 2
     providers = {k: all_providers[k] for k in keys}
+    if args.view != "both":
+        providers = {k: p for k, p in providers.items() if p.mode == args.view}
+        if not providers:
+            sys.stderr.write(
+                f"No enabled providers match --view {args.view}. "
+                "Enable a matching provider with `agent-quota setup` or use --only.\n"
+            )
+            return 2
 
     console = Console()
     browsers = args.browser

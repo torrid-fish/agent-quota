@@ -54,6 +54,8 @@ agent-quota setup                 # interactive picker for which providers to en
 agent-quota --watch               # auto-refresh every 15s
 agent-quota --watch 30            # custom interval
 agent-quota --only claude,codex   # one-off subset (overrides config)
+agent-quota --view usage          # show only the usage-based limits table
+agent-quota --view payg           # show only the pay-as-you-go quota table
 agent-quota --browser firefox     # cookie source for cookie-auth providers
 ```
 

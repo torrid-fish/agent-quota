@@ -70,6 +70,7 @@ Choose the `mode` based on what the numbers mean:
 - One key: `enabled = ["claude", "codex", ...]`. Loaded by `agent_quota.load_config`.
 - Written by `agent-quota setup` (interactive picker via `rich.prompt.Confirm`).
 - Resolution order in `_resolve_keys`: `--only` flag > config.toml > interactive setup prompt (TTY only) > all providers.
+- `--view {usage,payg,both}` post-filters the resolved provider set by `mode` before fetch. Defaults to `both`. Composes with `--only` (AND semantics). If the filter leaves zero providers, the CLI exits 2 with a hint to re-run `setup` or use `--only`.
 - Per-provider `~/.config/agent-quota/<name>.conf` files are unrelated — they hold tokens, not the enabled list.
 
 **Caching** (`common.get_cached_or_fetch`)
@@ -106,6 +107,8 @@ uv run agent-quota                  # default one-shot (reads config.toml)
 uv run agent-quota setup            # re-run the interactive picker
 uv run agent-quota --watch 5        # auto-refresh
 uv run agent-quota --only claude    # one-off subset, ignores config
+uv run agent-quota --view usage     # render only the usage-based limits table
+uv run agent-quota --view payg      # render only the pay-as-you-go quota table
 uv run python -m providers.claude   # debug a single provider in isolation
 ```
 
