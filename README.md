@@ -2,35 +2,13 @@
 
 One command, terminal tables for the AI products that matter when you live inside subscription and rate-limit windows: **Claude**, **OpenAI Codex**, **GitHub Copilot**, **OpenCode**, **Z.ai**, plus optional balance views for **OpenCode Zen**, **OpenRouter**, and **DeepSeek**.
 
-```
-                              Usage-Based Limits
-┏━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
-┃ Provider ┃ Plan ┃ User         ┃ Window ┃ Usage                      ┃ Reset ┃
-┡━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
-│ Claude   │ Pro  │ —            │ 5h     │ ████████▓▓▓▓▓  23%  ▓▓▓▓▓ │ 1h17m │
-│          │      │              │ 7d     │ ████████▓▓▓▓▓  23%  ▓▓▓▓▓ │ 5d02h │
-├──────────┼──────┼──────────────┼────────┼────────────────────────────┼───────┤
-│ Codex    │ Team │ Kuan-Ting Wu │ 5h     │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓  0%  ▓▓▓▓▓ │     — │
-│          │      │              │ Weekly │ ▓▓▓▓▓▓▓▓▓▓▓▓▓  3%  ▓▓▓▓▓▓ │ 5d23h │
-├──────────┼──────┼──────────────┼────────┼────────────────────────────┼───────┤
-│ Copilot  │ Team │ —            │ Premium│ ▓▓▓▓▓▓▓▓▓▓▓ 0 / 300 ▓▓▓▓▓ │ monthly│
-├──────────┼──────┼──────────────┼────────┼────────────────────────────┼───────┤
-│ Z.ai     │ L2   │ —            │ Tokens │ ███████▓▓▓ 1.2K / 5.0M ▓▓▓ │ 2h08m │
-└──────────┴──────┴──────────────┴────────┴────────────────────────────┴───────┘
-
-                             Pay-As-You-Go Quota
-┏━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
-┃ Provider     ┃ Status   ┃ Metric  ┃ Quota                           ┃ Reset ┃
-┡━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
-│ OpenCode Zen │ OK       │ Balance │ $19.43                          │     — │
-└──────────────┴──────────┴─────────┴─────────────────────────────────┴───────┘
-```
+![](./preview.jpg)
 
 `agent-quota` is positioned first as a tracker for subscription-backed and rate-limited AI usage: rolling 5h windows, weekly caps, monthly included quotas, token buckets, and similar limits. That is the main product surface, and today it includes `Claude`, `Codex`, `Copilot`, `Z.ai`, and `OpenCode`, with room for more IDE and platform subscriptions in the same shape. The usage table now shows `Plan` and `User` metadata next to each provider's windows; providers that do not expose those fields yet render `—` or `Unknown`.
 
 Pay-as-you-go balances are still supported, but as a secondary table for credits and prepaid balances such as `OpenCode Zen`, `OpenRouter`, and `DeepSeek`. The usage bar fills its allocated width with the metric value overlaid in the centre. Bar colour shifts at 70% (yellow) and 90% (red); rows without a percentage render as plain text. `Claude` now resolves plan, team, and user details from its account and organization endpoints; `Codex` resolves the subscription plan plus the signed-in user name from the ChatGPT session payload. Human-readable Codex team/workspace names are still limited by what that session payload exposes.
 
-Forked from [waybar-ai-usage](https://github.com/NihilDigit/waybar-ai-usage) — same providers, no Waybar / Wayland / Linux dependency. Just a terminal.
+Forked from [waybar-ai-usage](https://github.com/NihilDigit/waybar-ai-usage) — no Waybar / Wayland / Linux dependency. Just a terminal.
 
 ## Install
 
