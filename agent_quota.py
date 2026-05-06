@@ -32,6 +32,7 @@ PROVIDER_META: dict[str, tuple[str, str]] = {
     "copilot": ("Copilot", "GitHub Copilot premium requests (PAT or browser cookies)"),
     "zai": ("Z.ai", "Z.ai 5h tokens / monthly tools (API token)"),
     "zen": ("Zen", "OpenCode Zen balance (browser cookies)"),
+    "go": ("Go", "OpenCode Go 5h / weekly / monthly usage (browser cookies)"),
 }
 
 
@@ -153,6 +154,27 @@ def _adapt_zen(raw: dict) -> list[Metric]:
     return [Metric("Balance", f"${bal:.2f}", None, "—")]
 
 
+def _adapt_go(raw: dict) -> list[Metric]:
+    rows = [
+        ("5h", "rollingUsage"),
+        ("Weekly", "weeklyUsage"),
+        ("Monthly", "monthlyUsage"),
+    ]
+    windows = raw.get("windows") or {}
+    metrics: list[Metric] = []
+    for label, key in rows:
+        w = windows.get(key)
+        if not w:
+            continue
+        pct = float(w["usage_percent"])
+        if pct == 0 or not w["reset_in_sec"]:
+            reset = "—"
+        else:
+            reset = format_eta(time.time() + w["reset_in_sec"])
+        metrics.append(Metric(label, f"{pct:.0f}%", pct, reset))
+    return metrics
+
+
 # ===== Fetchers (lazy import so a missing optional dep doesn't kill the whole tool) =====
 
 
@@ -191,6 +213,12 @@ def _fetch_zen(browsers):
     return get_zen_balance(browsers)
 
 
+def _fetch_go(browsers):
+    from go import get_go_usage
+
+    return get_go_usage(browsers)
+
+
 @dataclass
 class _Provider:
     name: str
@@ -210,6 +238,7 @@ def _build_providers() -> dict[str, _Provider]:
         "copilot": _adapt_copilot_factory(copilot_quota),
         "zai": _adapt_zai,
         "zen": _adapt_zen,
+        "go": _adapt_go,
     }
     fetchers = {
         "claude": _fetch_claude,
@@ -217,6 +246,7 @@ def _build_providers() -> dict[str, _Provider]:
         "copilot": _fetch_copilot,
         "zai": _fetch_zai,
         "zen": _fetch_zen,
+        "go": _fetch_go,
     }
     return {
         key: _Provider(name=meta[0], fetch=fetchers[key], adapt=adapters[key])
@@ -508,7 +538,7 @@ def main() -> int:
     parser.add_argument(
         "--only",
         metavar="LIST",
-        help="Comma-separated providers (overrides config). Known: claude,codex,copilot,zai,zen",
+        help="Comma-separated providers (overrides config). Known: claude,codex,copilot,zai,zen,go",
     )
     parser.add_argument(
         "--watch",
