@@ -17,97 +17,126 @@ from common import get_cached_or_fetch, load_cookies
 # ==================== Configuration ====================
 
 ZEN_DOMAIN = "opencode.ai"
-ZEN_URL = "https://opencode.ai/auth"
+AUTH_URL = "https://opencode.ai/auth"
 
 BASE_HEADERS = {
-    "Referer": "https://opencode.ai/auth",
+    "Referer": "https://opencode.ai/",
     "Origin": "https://opencode.ai",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
 CACHE_TTL = 120  # Cache for 120 seconds
 
+_WORKSPACE_RE = re.compile(r"/workspace/(wrk_[A-Za-z0-9]+)")
+
 
 # ==================== Core Logic: Get Balance ====================
 
 
 def _parse_balance_from_html(html_content: str) -> float | None:
-    """Parse balance from HTML content using various patterns"""
+    """Parse balance from the billing page HTML.
 
-    # Pattern 1: JS state object — balance:<number> (integer or decimal)
-    # e.g. balance:0  or  balance:19.43
-    balance_match = re.search(
-        r"balance:([0-9]+(?:\.[0-9]+)?)",
+    The page renders the balance as:
+        <span data-slot="balance-value">$<!--$-->17.66<!--/--></span>
+    where `<!--$-->` / `<!--/-->` are React server-rendered boundary
+    markers. The legacy patterns are kept as a safety net in case the
+    template changes again, but the data-slot anchor is the load-bearing
+    one — DO NOT replace it with a loose `balance:<number>` regex, which
+    matches an unrelated unix-timestamp-shaped field in the inline JS
+    state and silently returns wildly wrong numbers.
+    """
+
+    # Pattern 1 (current): data-slot="balance-value">$<!--$-->NN.NN<!--/-->
+    m = re.search(
+        r'data-slot="balance-value">\s*\$\s*(?:<!--\$-->\s*)?'
+        r'([0-9]+(?:\.[0-9]+)?)',
         html_content,
     )
-    if balance_match:
-        return float(balance_match.group(1))
+    if m:
+        return float(m.group(1))
 
-    # Pattern 2: data-slot="balance" structure with HTML comments (legacy)
-    balance_match = re.search(
+    # Pattern 2: data-slot="balance" with "Current balance" label (legacy)
+    m = re.search(
         r'data-slot="balance"[^>]*>.*?Current balance.*?<b>\$\s*<!--\$-->([0-9]+\.[0-9]{2})<!--/-->',
         html_content,
         re.DOTALL,
     )
-    if balance_match:
-        return float(balance_match.group(1))
+    if m:
+        return float(m.group(1))
 
-    # Pattern 3: Simple "Current balance $XX.XX" pattern (legacy)
-    balance_match = re.search(
+    # Pattern 3: bare "Current balance $XX.XX" text (legacy)
+    m = re.search(
         r"Current balance\s*\$\s*([0-9]+\.[0-9]{2})",
         html_content,
     )
-    if balance_match:
-        return float(balance_match.group(1))
+    if m:
+        return float(m.group(1))
 
     return None
 
 
+def _resolve_workspace(cookies: dict) -> str:
+    """Hit /auth, follow the redirect, return the wrk_... id from the URL."""
+    resp = requests.get(
+        AUTH_URL,
+        cookies=cookies,
+        headers=BASE_HEADERS,
+        impersonate="chrome",
+        timeout=10,
+        allow_redirects=True,
+    )
+    if resp.status_code == 403:
+        raise RuntimeError(
+            "403 Forbidden on /auth: cookies expired? Refresh opencode.ai in your browser."
+        )
+    resp.raise_for_status()
+    m = _WORKSPACE_RE.search(str(resp.url))
+    if not m:
+        raise RuntimeError(f"Could not locate workspace id in redirect URL: {resp.url}")
+    return m.group(1)
+
+
 def _fetch_zen_balance_uncached(browsers: list[str] | None = None) -> dict:
-    """Internal function to fetch Zen balance without caching"""
+    """Auto-discover the workspace, then scrape balance off /billing."""
     try:
         cookies, _browser = load_cookies(ZEN_DOMAIN, browsers)
     except Exception as e:
         raise RuntimeError(f"Failed to read cookies: {e}")
 
-    # Try zen URL first - it redirects to the specific workspace
     last_error = None
     for attempt in range(2):
         try:
+            ws_id = _resolve_workspace(cookies)
             resp = requests.get(
-                ZEN_URL,
+                f"https://{ZEN_DOMAIN}/workspace/{ws_id}/billing",
                 cookies=cookies,
                 headers=BASE_HEADERS,
                 impersonate="chrome",
                 timeout=10,
-                allow_redirects=True,  # Follow redirects to specific workspace
+                allow_redirects=True,
             )
 
             if resp.status_code == 403:
                 raise RuntimeError(
-                    "403 Forbidden: Try updating browser_cookie3 or refresh the page in browser."
+                    "403 Forbidden on /billing: cookies expired? Refresh opencode.ai in your browser."
                 )
 
             resp.raise_for_status()
 
-            # Parse the HTML to find the balance
-            html_content = resp.text
-
-            balance = _parse_balance_from_html(html_content)
+            balance = _parse_balance_from_html(resp.text)
 
             if balance is not None:
                 return {"balance": balance, "currency": "USD"}
-            else:
-                raise RuntimeError(
-                    "Could not find balance. Please ensure you're logged into opencode.ai/zen in your browser."
-                )
+            raise RuntimeError(
+                "Could not find balance on the billing page. "
+                "Open opencode.ai in your browser and confirm the page renders correctly."
+            )
 
         except Exception as e:
             last_error = e
-            if attempt == 0:  # First failure, retry
+            if attempt == 0:
                 continue
 
-    # All attempts failed
     raise RuntimeError(f"Request failed: {last_error}")
 
 

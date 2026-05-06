@@ -31,8 +31,8 @@ PROVIDER_META: dict[str, tuple[str, str]] = {
     "codex": ("Codex", "ChatGPT Codex 5h / weekly quota (browser cookies)"),
     "copilot": ("Copilot", "GitHub Copilot premium requests (PAT or browser cookies)"),
     "zai": ("Z.ai", "Z.ai 5h tokens / monthly tools (API token)"),
-    "zen": ("Zen", "OpenCode Zen balance (browser cookies)"),
-    "go": ("Go", "OpenCode Go 5h / weekly / monthly usage (browser cookies)"),
+    "zen": ("OpenCode Zen", "OpenCode Zen balance (browser cookies)"),
+    "go": ("OpenCode Go", "OpenCode Go 5h / weekly / monthly usage (browser cookies)"),
 }
 
 
