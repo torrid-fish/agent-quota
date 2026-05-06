@@ -215,12 +215,20 @@ _STATE_STYLE = {"ok": "green", "auth_err": "red", "net_err": "yellow"}
 _STATE_LABEL = {"ok": "OK", "auth_err": "Auth Err", "net_err": "Net Err"}
 
 
+_BAR_WIDTH = 10
+
+
 def _usage_cell(metric: Metric) -> Text:
     if metric.pct is None:
         return Text(metric.value)
-    pct = metric.pct
+    pct = max(0.0, min(100.0, metric.pct))
+    filled = round(pct / 100 * _BAR_WIDTH)
     color = "green" if pct < 70 else "yellow" if pct < 90 else "red"
-    return Text(metric.value, style=color)
+    return Text.assemble(
+        ("█" * filled, color),
+        ("░" * (_BAR_WIDTH - filled), "dim"),
+        (f" {metric.value}", color),
+    )
 
 
 def render_table(statuses: list[ProviderStatus]) -> Table:
@@ -234,24 +242,44 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
     table.add_column("Provider", no_wrap=True)
     table.add_column("Status", no_wrap=True)
     table.add_column("Window", no_wrap=True)
-    table.add_column("Usage", justify="right")
+    table.add_column(
+        "Usage",
+        no_wrap=True,
+        min_width=_BAR_WIDTH + 12,
+        max_width=_BAR_WIDTH + 12,
+        overflow="ellipsis",
+    )
     table.add_column("Reset", justify="right", no_wrap=True)
 
-    for s in statuses:
+    last_idx = len(statuses) - 1
+
+    for s_idx, s in enumerate(statuses):
+        is_last_provider = s_idx == last_idx
         state = Text(_STATE_LABEL[s.state], style=_STATE_STYLE[s.state])
+
         if s.state != "ok":
-            table.add_row(s.name, state, "—", Text(s.error or "(no detail)", style="dim"), "—")
+            table.add_row(
+                s.name, state, "—", Text(s.error or "(no detail)", style="dim"), "—",
+                end_section=not is_last_provider,
+            )
             continue
         if not s.metrics:
-            table.add_row(s.name, state, "—", Text("no data", style="dim"), "—")
+            table.add_row(
+                s.name, state, "—", Text("no data", style="dim"), "—",
+                end_section=not is_last_provider,
+            )
             continue
+
+        last_metric = len(s.metrics) - 1
         for i, m in enumerate(s.metrics):
+            end_section = (i == last_metric) and not is_last_provider
             table.add_row(
                 s.name if i == 0 else "",
                 state if i == 0 else "",
                 m.label,
                 _usage_cell(m),
                 m.reset,
+                end_section=end_section,
             )
     return table
 
