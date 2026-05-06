@@ -1,4 +1,5 @@
 """agent-quota: show AI provider quotas as a TUI table."""
+
 from __future__ import annotations
 
 import argparse
@@ -20,22 +21,22 @@ from rich.text import Text
 
 from common import format_eta, parse_window_direct, parse_window_percent
 
-
 CONFIG_PATH = Path("~/.config/agent-quota/config.toml").expanduser()
 
 
 # Static metadata used by setup/picker. Keep ordered — setup walks this dict
 # in registration order, which is also the table row order.
 PROVIDER_META: dict[str, tuple[str, str]] = {
-    "claude":  ("Claude",  "Claude.ai 5h / 7d quota (browser cookies)"),
-    "codex":   ("Codex",   "ChatGPT Codex 5h / weekly quota (browser cookies)"),
+    "claude": ("Claude", "Claude.ai 5h / 7d quota (browser cookies)"),
+    "codex": ("Codex", "ChatGPT Codex 5h / weekly quota (browser cookies)"),
     "copilot": ("Copilot", "GitHub Copilot premium requests (PAT or browser cookies)"),
-    "zai":     ("Z.ai",    "Z.ai 5h tokens / monthly tools (API token)"),
-    "zen":     ("Zen",     "OpenCode Zen balance (browser cookies)"),
+    "zai": ("Z.ai", "Z.ai 5h tokens / monthly tools (API token)"),
+    "zen": ("Zen", "OpenCode Zen balance (browser cookies)"),
 }
 
 
 # ===== Normalized data model =====
+
 
 @dataclass
 class Metric:
@@ -56,6 +57,7 @@ class ProviderStatus:
 
 # ===== Adapters: provider raw dict -> Metric list =====
 
+
 def _window_reset(win) -> str:
     if not win.resets_at:
         return "—"
@@ -67,9 +69,13 @@ def _window_reset(win) -> str:
 def _adapt_claude(raw: dict) -> list[Metric]:
     fh = parse_window_percent(raw.get("five_hour"))
     sd = parse_window_percent(raw.get("seven_day"))
+    sn = parse_window_percent(raw.get("seven_day_sonnet"))
     return [
         Metric("5h", f"{fh.utilization:.0f}%", fh.utilization, _window_reset(fh)),
         Metric("7d", f"{sd.utilization:.0f}%", sd.utilization, _window_reset(sd)),
+        Metric(
+            "7d Sonnet", f"{sn.utilization:.0f}%", sn.utilization, _window_reset(sn)
+        ),
     ]
 
 
@@ -100,6 +106,7 @@ def _adapt_copilot_factory(quota: int):
         pct = (used / quota * 100) if quota > 0 else None
         value = f"{used:g} / {quota}" if quota > 0 else f"{used:g}"
         return [Metric("Premium", value, pct, reset)]
+
     return adapt
 
 
@@ -148,24 +155,29 @@ def _adapt_zen(raw: dict) -> list[Metric]:
 
 # ===== Fetchers (lazy import so a missing optional dep doesn't kill the whole tool) =====
 
+
 def _fetch_claude(browsers):
     from claude import get_claude_usage
+
     return get_claude_usage(browsers)
 
 
 def _fetch_codex(browsers):
     from codex import get_codex_usage
+
     return get_codex_usage(browsers)
 
 
 def _fetch_copilot(browsers):
     from copilot import get_copilot_usage, load_copilot_config
+
     cfg = load_copilot_config()
     return get_copilot_usage(cfg.get("GITHUB_TOKEN"))
 
 
 def _fetch_zai(browsers):
     from zai import get_zai_quota, load_zai_config
+
     cfg = load_zai_config()
     token = cfg.get("ZAI_TOKEN")
     if not token:
@@ -175,6 +187,7 @@ def _fetch_zai(browsers):
 
 def _fetch_zen(browsers):
     from zen import get_zen_balance
+
     return get_zen_balance(browsers)
 
 
@@ -189,20 +202,21 @@ def _build_providers() -> dict[str, _Provider]:
     # Copilot quota lives in its own config file; load once so the adapter can
     # format used/quota.
     from copilot import load_copilot_config
+
     copilot_quota = load_copilot_config().get("COPILOT_QUOTA") or 300
     adapters = {
-        "claude":  _adapt_claude,
-        "codex":   _adapt_codex,
+        "claude": _adapt_claude,
+        "codex": _adapt_codex,
         "copilot": _adapt_copilot_factory(copilot_quota),
-        "zai":     _adapt_zai,
-        "zen":     _adapt_zen,
+        "zai": _adapt_zai,
+        "zen": _adapt_zen,
     }
     fetchers = {
-        "claude":  _fetch_claude,
-        "codex":   _fetch_codex,
+        "claude": _fetch_claude,
+        "codex": _fetch_codex,
         "copilot": _fetch_copilot,
-        "zai":     _fetch_zai,
-        "zen":     _fetch_zen,
+        "zai": _fetch_zai,
+        "zen": _fetch_zen,
     }
     return {
         key: _Provider(name=meta[0], fetch=fetchers[key], adapt=adapters[key])
@@ -211,6 +225,7 @@ def _build_providers() -> dict[str, _Provider]:
 
 
 # ===== agent-quota config (which providers are enabled) =====
+
 
 def load_config() -> dict | None:
     """Load ~/.config/agent-quota/config.toml. Returns None if missing or unreadable."""
@@ -288,9 +303,7 @@ def _resolve_keys(args, all_providers: dict[str, _Provider]) -> list[str] | None
     # No --only and no usable config. Offer to set up if interactive; otherwise
     # fall back to running everything so cron/pipe usage still works.
     if sys.stdin.isatty() and sys.stdout.isatty():
-        Console().print(
-            f"[yellow]No agent-quota config at[/] [dim]{CONFIG_PATH}[/]"
-        )
+        Console().print(f"[yellow]No agent-quota config at[/] [dim]{CONFIG_PATH}[/]")
         if Confirm.ask("Run setup now?", default=True):
             run_setup()
             cfg = load_config()
@@ -302,7 +315,16 @@ def _resolve_keys(args, all_providers: dict[str, _Provider]) -> list[str] | None
 
 # ===== Error classification =====
 
-_AUTH_HINTS = ("403", "401", "404", "unauthorized", "forbidden", "cookie", "token", "lastactiveorg")
+_AUTH_HINTS = (
+    "403",
+    "401",
+    "404",
+    "unauthorized",
+    "forbidden",
+    "cookie",
+    "token",
+    "lastactiveorg",
+)
 
 
 def _classify(exc: Exception) -> str:
@@ -311,6 +333,7 @@ def _classify(exc: Exception) -> str:
 
 
 # ===== Fetch orchestration =====
+
 
 def fetch_one(key: str, prov: _Provider, browsers: list[str] | None) -> ProviderStatus:
     status = ProviderStatus(key=key, name=prov.name)
@@ -328,7 +351,9 @@ def fetch_one(key: str, prov: _Provider, browsers: list[str] | None) -> Provider
     return status
 
 
-def fetch_all(providers: dict[str, _Provider], browsers: list[str] | None) -> list[ProviderStatus]:
+def fetch_all(
+    providers: dict[str, _Provider], browsers: list[str] | None
+) -> list[ProviderStatus]:
     results: dict[str, ProviderStatus] = {}
     with ThreadPoolExecutor(max_workers=max(1, len(providers))) as pool:
         futs = {pool.submit(fetch_one, k, p, browsers): k for k, p in providers.items()}
@@ -358,7 +383,9 @@ class _UsageBar:
             return "yellow"
         return "red"
 
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
         width = options.max_width
         if width <= 0:
             yield Text("")
@@ -379,7 +406,9 @@ class _UsageBar:
                 result.append(char, style=f"bold {color} on grey23")
         yield result
 
-    def __rich_measure__(self, console: Console, options: ConsoleOptions) -> Measurement:
+    def __rich_measure__(
+        self, console: Console, options: ConsoleOptions
+    ) -> Measurement:
         # Floor needs to be high enough that the bar still reads as a bar even
         # when options.max_width is small or 0 (which happens during the first
         # measure pass in Live mode). Returning Measurement(0, 0) here would
@@ -406,17 +435,23 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
     # vertical="middle" lets the single-line Provider/Status/Reset cells sit
     # centered next to multi-line Window/Usage cells when a provider has
     # multiple metrics (e.g. Claude's 5h + 7d).
-    table.add_column("Provider", no_wrap=True, vertical="middle")
-    table.add_column("Status", no_wrap=True, vertical="middle")
-    table.add_column("Window", no_wrap=True, vertical="middle")
+    table.add_column(
+        Text("Provider", justify="center"), no_wrap=True, vertical="middle"
+    )
+    table.add_column(Text("Status", justify="center"), no_wrap=True, vertical="middle")
+    table.add_column(Text("Window", justify="center"), no_wrap=True, vertical="middle")
     # Custom Text header so we can center "Usage" without setting
     # justify="center" on the column itself — that would shrink the _UsageBar
     # to its measured minimum and pad around it instead of filling the column.
     table.add_column(
         Text("Usage", justify="center"),
-        no_wrap=True, ratio=1, min_width=14, overflow="ellipsis", vertical="middle",
+        no_wrap=True,
+        ratio=1,
+        min_width=14,
+        overflow="ellipsis",
+        vertical="middle",
     )
-    table.add_column("Reset", justify="right", no_wrap=True, vertical="middle")
+    table.add_column(Text("Reset", justify="right"), no_wrap=True, vertical="middle")
 
     last_idx = len(statuses) - 1
 
@@ -426,13 +461,21 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
 
         if s.state != "ok":
             table.add_row(
-                s.name, state, "—", Text(s.error or "(no detail)", style="dim"), "—",
+                s.name,
+                state,
+                "—",
+                Text(s.error or "(no detail)", style="dim"),
+                "—",
                 end_section=end_section,
             )
             continue
         if not s.metrics:
             table.add_row(
-                s.name, state, "—", Text("no data", style="dim"), "—",
+                s.name,
+                state,
+                "—",
+                Text("no data", style="dim"),
+                "—",
                 end_section=end_section,
             )
             continue
@@ -448,11 +491,14 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
         usage = Group(*(_usage_cell(m) for m in s.metrics))
         name_cell = Text(pad + s.name)
         state_cell = Text(pad) + state
-        table.add_row(name_cell, state_cell, windows, usage, resets, end_section=end_section)
+        table.add_row(
+            name_cell, state_cell, windows, usage, resets, end_section=end_section
+        )
     return table
 
 
 # ===== Main =====
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(

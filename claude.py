@@ -79,14 +79,16 @@ def get_claude_usage(browsers: list[str] | None = None) -> dict:
 def print_cli(usage: dict) -> None:
     fh = parse_window_percent(usage.get("five_hour"))
     sd = parse_window_percent(usage.get("seven_day"))
+    sn = parse_window_percent(usage.get("seven_day_sonnet"))
 
     def _fmt_reset(win):
         if win.utilization == 0 and win.resets_at is None:
             return "Not started"
         return format_eta(win.resets_at)
 
-    print(f"5-hour : {fh.utilization:.1f}%  (Reset in {_fmt_reset(fh)})")
-    print(f"7-day  : {sd.utilization:.1f}%  (Reset in {_fmt_reset(sd)})")
+    print(f"5-hour       : {fh.utilization:.1f}%  (Reset in {_fmt_reset(fh)})")
+    print(f"7-day        : {sd.utilization:.1f}%  (Reset in {_fmt_reset(sd)})")
+    print(f"7-day Sonnet : {sn.utilization:.1f}%  (Reset in {_fmt_reset(sn)})")
 
 
 # ==================== CLI Entry Point ====================
