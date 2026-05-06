@@ -273,11 +273,28 @@ def _format_plan_value(value) -> str:
 
 
 def _plan_claude(raw: dict) -> str:
+    identity = raw.get("identity") or {}
+    value = identity.get("plan")
+    plan = _format_plan_value(value)
+    team_name = identity.get("team_name")
+    if plan == "Team" and team_name:
+        return f"Team ({team_name})"
     value = _find_nested_value(
         raw,
         {"plan", "plan_type", "subscription_plan", "subscription_tier", "tier"},
     )
-    return _format_plan_value(value)
+    if value not in (None, ""):
+        return _format_plan_value(value)
+    return plan
+
+
+def _user_claude(raw: dict) -> str:
+    identity = raw.get("identity") or {}
+    return (
+        identity.get("user_name")
+        or identity.get("account_name")
+        or "Unknown"
+    )
 
 
 def _plan_codex(raw: dict) -> str:
@@ -464,7 +481,7 @@ def _build_providers() -> dict[str, _Provider]:
         "deepseek": None,
     }
     users = {
-        "claude": None,
+        "claude": _user_claude,
         "codex": _user_codex,
         "copilot": None,
         "zai": None,
