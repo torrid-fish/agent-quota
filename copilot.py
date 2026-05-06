@@ -11,14 +11,12 @@ from pathlib import Path
 
 from curl_cffi import requests
 
-from common import format_eta, format_output, get_cached_or_fetch, load_cookies
+from common import format_eta, get_cached_or_fetch, load_cookies
 
 
 # ==================== Configuration ====================
 
 CONFIG_PATH = Path("~/.config/waybar-ai-usage/copilot.conf").expanduser()
-COPILOT_ICON = "\uf4b8"   # nf-seti-copilot — same as LazyVim/Neovim Copilot ()
-COPILOT_COLOR = "#8b5cf6"
 DEFAULT_QUOTA = 300
 GITHUB_API_BASE = "https://api.github.com"
 COPILOT_FEATURES_URL = "https://github.com/settings/copilot/features"
@@ -180,7 +178,7 @@ def get_copilot_usage(token: str | None) -> dict:
         return fetch_browser()
 
 
-# ==================== Output: CLI / Waybar ====================
+# ==================== Output: CLI ====================
 
 def _next_month_reset_iso() -> str:
     """Return ISO timestamp for 00:00 UTC on the 1st of next month."""
@@ -202,90 +200,10 @@ def print_cli(used: float, quota: int) -> None:
     print(f"Reset: {reset_str} (next month, 1st at 00:00 UTC)")
 
 
-def print_waybar(
-    used: float,
-    quota: int,
-    format_str: str | None = None,
-    tooltip_format: str | None = None,
-) -> None:
-    """Print Waybar JSON output."""
-    pct = min(round(used / quota * 100) if quota > 0 else 0, 100)
-    reset_iso = _next_month_reset_iso()
-    reset_str = format_eta(reset_iso)
-
-    icon_styled = f"<span foreground='{COPILOT_COLOR}' size='large'>{COPILOT_ICON} </span>"
-    time_icon_styled = f"<span foreground='{COPILOT_COLOR}' size='large'>\U000f051a</span>"  # 󰔚
-
-    used_str = str(int(used)) if used % 1 == 0 else str(used)
-
-    data = {
-        "icon": icon_styled,
-        "icon_plain": COPILOT_ICON,
-        "time_icon": time_icon_styled,
-        "time_icon_plain": "\U000f051a",
-        "used": used,
-        "used_str": used_str,
-        "quota": quota,
-        "pct": pct,
-        "reset": reset_str,
-    }
-
-    if format_str:
-        text = format_output(format_str, data)
-    else:
-        text = f"{icon_styled}{pct}% {time_icon_styled} {reset_str}"
-
-    if tooltip_format:
-        tooltip = format_output(tooltip_format, data)
-    else:
-        tooltip = (
-            f"GitHub Copilot Premium Requests\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Used:   {used_str} / {quota} ({pct}%)\n"
-            f"Reset:  {reset_str} (next month)\n"
-            f"\nClick to Refresh"
-        )
-
-    if pct < 50:
-        cls = "copilot-low"
-    elif pct < 80:
-        cls = "copilot-mid"
-    else:
-        cls = "copilot-high"
-
-    output = {
-        "text": text,
-        "tooltip": tooltip,
-        "class": cls,
-        "percentage": pct,
-    }
-    print(json.dumps(output))
-
-
 # ==================== CLI Entry Point ====================
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Show GitHub Copilot premium request usage in Waybar",
-    )
-    parser.add_argument(
-        "--waybar",
-        action="store_true",
-        help="Output in JSON format for Waybar custom module",
-    )
-    parser.add_argument(
-        "--format",
-        type=str,
-        help=(
-            "Custom format string for waybar text. Available: {icon}, {icon_plain}, "
-            "{used}, {quota}, {pct}, {reset}. Example: '{icon_plain} {pct}%%'"
-        ),
-    )
-    parser.add_argument(
-        "--tooltip-format",
-        type=str,
-        help="Custom format string for tooltip. Uses same variables as --format.",
-    )
+    parser = argparse.ArgumentParser(description="Print GitHub Copilot premium request usage to terminal.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -305,60 +223,15 @@ def main() -> None:
         if pct is not None:
             used = round(quota * float(pct) / 100, 1)
     except Exception as e:
-        if args.waybar:
-            err_msg = str(e)
-            is_auth = any(
-                marker in err_msg
-                for marker in (
-                    "401",
-                    "403",
-                    "404",
-                    "Failed to read cookies for github.com",
-                    "no copilot usage section",
-                )
-            )
-            short_err = "Auth Err" if is_auth else "Net Err"
-            tooltip = f"Error fetching Copilot usage:\n{err_msg}"
-            if not token:
-                tooltip += (
-                    f"\n\nNo GITHUB_TOKEN found in {args.config}."
-                    "\nFor personal Copilot, create a fine-grained PAT with"
-                    "\n'Plan (read)' permission."
-                    "\nFor organization-managed Copilot, log into GitHub in any browser"
-                    "\nand make sure usage is visible on"
-                    "\nhttps://github.com/settings/copilot/features"
-                )
-            if "Failed to read cookies for github.com" in err_msg or "no copilot usage section" in err_msg:
-                tooltip += (
-                    "\n\nFor organization-managed Copilot, make sure you're logged into"
-                    "\nGitHub in a browser (Chrome, Chromium, Brave, Firefox, etc.)"
-                    "\nand can see usage on"
-                    "\nhttps://github.com/settings/copilot/features"
-                )
-                if token:
-                    tooltip += (
-                        "\n\nFor personal Copilot, verify your fine-grained PAT has"
-                        "\nUser permissions -> Plan -> Read-only."
-                    )
-            print(json.dumps({
-                "text": f"<span foreground='#ff5555'>{COPILOT_ICON} {short_err}</span>",
-                "tooltip": tooltip,
-                "class": "critical",
-            }))
-            sys.exit(0)
-        else:
-            if not token:
-                print(f"[!] Error: No GITHUB_TOKEN in {args.config}", file=sys.stderr)
-                print("    For personal Copilot, create a fine-grained PAT with 'Plan (read)' permission.", file=sys.stderr)
-                print("    For organization-managed Copilot, log into GitHub in any browser and check:", file=sys.stderr)
-                print(f"    {COPILOT_FEATURES_URL}", file=sys.stderr)
-            print(f"[!] Critical Error: {e}", file=sys.stderr)
-            sys.exit(1)
+        if not token:
+            print(f"[!] No GITHUB_TOKEN in {args.config}", file=sys.stderr)
+            print("    For personal Copilot, create a fine-grained PAT with 'Plan (read)' permission.", file=sys.stderr)
+            print("    For organization-managed Copilot, log into GitHub in any browser and check:", file=sys.stderr)
+            print(f"    {COPILOT_FEATURES_URL}", file=sys.stderr)
+        print(f"[!] {e}", file=sys.stderr)
+        sys.exit(1)
 
-    if args.waybar:
-        print_waybar(used, quota, args.format, args.tooltip_format)
-    else:
-        print_cli(used, quota)
+    print_cli(used, quota)
 
 
 if __name__ == "__main__":

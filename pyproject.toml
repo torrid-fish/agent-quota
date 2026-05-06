@@ -21,7 +21,6 @@ classifiers = [
 dependencies = [
     "browser-cookie3>=0.20.1",
     "curl-cffi>=0.13.0",
-    "json-five>=1.1.2",
 ]
 
 [project.urls]
@@ -35,14 +34,13 @@ codex-usage = "codex:main"
 copilot-usage = "copilot:main"
 zen-balance = "zen:main"
 zai-usage = "zai:main"
-waybar-ai-usage = "waybar_ai_usage:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["claude.py", "codex.py", "copilot.py", "zen.py", "zai.py", "common.py", "waybar_ai_usage.py"]
+packages = ["claude.py", "codex.py", "copilot.py", "zen.py", "zai.py", "common.py"]
 
 [dependency-groups]
 dev = []

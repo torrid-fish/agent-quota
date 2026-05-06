@@ -1,4 +1,4 @@
-"""Common utilities shared between claude.py and codex.py"""
+"""Common utilities shared by all provider modules."""
 from __future__ import annotations
 
 import configparser
@@ -16,38 +16,9 @@ import browser_cookie3
 
 DEFAULT_BROWSERS = ("chrome", "chromium", "brave", "edge", "firefox", "helium")
 
-LOGIN_URLS = {
-    "claude.ai": "https://claude.ai",
-    "chatgpt.com": "https://chatgpt.com",
-    "opencode.ai": "https://opencode.ai/zen",
-}
-
 
 # Cache configuration
 CACHE_DIR = Path.home() / ".cache" / "waybar-ai-usage"
-LOGIN_OPEN_COOLDOWN = 600  # Don't re-open the same login page within 10 minutes
-
-
-def open_login_url(url: str) -> bool:
-    """Try to open URL in default browser with cooldown to avoid repeated opens."""
-    import hashlib
-    import subprocess
-
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    marker = CACHE_DIR / f"login_{hashlib.md5(url.encode()).hexdigest()}"
-    if marker.exists() and (time.time() - marker.stat().st_mtime) < LOGIN_OPEN_COOLDOWN:
-        return False
-
-    try:
-        subprocess.Popen(
-            ["xdg-open", url],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        marker.touch()
-        return True
-    except FileNotFoundError:
-        return False
 CACHE_TTL = 60  # Cache valid for 60 seconds
 
 
@@ -59,8 +30,8 @@ def get_cached_or_fetch(
     """
     Get data from cache if fresh, otherwise fetch and cache.
 
-    This prevents multiple Waybar instances (one per monitor) from making
-    concurrent API requests that might be rate-limited.
+    The cross-process locking via .updating markers is kept so the cache
+    behaves correctly when --watch is run concurrently with one-shot calls.
 
     Args:
         cache_name: Name of cache file (e.g., "claude", "codex")
@@ -282,57 +253,3 @@ def format_eta(reset_at: str | int | None) -> str:
     return f"{mins}m{secs_rem:02}s"
 
 
-def format_output(format_string: str, data: dict) -> str:
-    """
-    Format output using a template string with placeholders.
-
-    Available placeholders:
-    - {5h_pct} - 5-hour utilization percentage (no decimals)
-    - {7d_pct} - 7-day utilization percentage (no decimals)
-    - {5h_reset} - 5-hour reset time (formatted)
-    - {7d_reset} - 7-day reset time (formatted)
-    - {icon} - service icon
-    - {time_icon} - time icon
-    - {status} - status text (Ready, Pause, or empty)
-    - {pct} - active window percentage
-    - {reset} - active window reset time
-
-    Conditional sections:
-    - {?5h_reset}...{/5h_reset} - show content only if 5h_reset is not "Not started"
-    - {?7d_reset}...{/7d_reset} - show content only if 7d_reset is not "Not started"
-    - {?5h_reset&7d_reset}...{/} - show content only if both are not "Not started"
-
-    Example:
-        format_output("{icon} {5h_pct}% {time_icon} {5h_reset}", data)
-        format_output("{?5h_reset}{5h_pct}/{5h_reset}{/5h_reset}{?5h_reset&7d_reset} - {/}{?7d_reset}{7d_pct}/{7d_reset}{/7d_reset}", data)
-    """
-    import re
-    
-    # Process conditional blocks with multiple variables: {?var1&var2&...}content{/}
-    def replace_multi_conditional(match):
-        var_names = match.group(1).split('&')
-        content = match.group(2)
-        # Check if all variables exist and are not "Not started"
-        all_valid = all(data.get(v.strip(), "") and data.get(v.strip(), "") != "Not started" for v in var_names)
-        if all_valid:
-            return content.format(**data)
-        return ""
-    
-    # Replace multi-variable conditional blocks first: {?var1&var2}content{/}
-    result = re.sub(r'\{\?([^}]+&[^}]+)\}(.*?)\{/\}', replace_multi_conditional, format_string)
-    
-    # Process single variable conditional blocks: {?var}content{/var}
-    def replace_conditional(match):
-        var_name = match.group(1)
-        content = match.group(2)
-        value = data.get(var_name, "")
-        # Show content only if value exists and is not "Not started"
-        if value and value != "Not started":
-            return content.format(**data)
-        return ""
-    
-    # Replace single-variable conditional blocks: {?var}content{/var}
-    result = re.sub(r'\{\?(\w+)\}(.*?)\{/\1\}', replace_conditional, result)
-    
-    # Replace remaining placeholders
-    return result.format(**data)

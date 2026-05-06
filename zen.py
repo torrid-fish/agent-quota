@@ -1,20 +1,17 @@
-#!/usr/bin/env python3
-"""OpenCode Zen balance fetcher for Waybar
+"""OpenCode Zen balance fetcher.
 
 Fetches current Zen balance from the OpenCode dashboard using browser cookies.
-Similar to the claude-usage and codex-usage widgets.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 
 from curl_cffi import requests
 
-from common import get_cached_or_fetch, load_cookies, open_login_url, LOGIN_URLS
+from common import get_cached_or_fetch, load_cookies
 
 
 # ==================== Configuration ====================
@@ -133,52 +130,11 @@ def print_cli(balance_data: dict) -> None:
     print(f"Zen Balance: ${balance_data['balance']:.2f} {balance_data['currency']}")
 
 
-def print_waybar(balance_data: dict) -> None:
-    """Print balance in JSON format for Waybar"""
-    balance = balance_data.get("balance", 0.0)
-
-    # Format the balance text
-    text = f"<span foreground='#DE7356'>ZEN</span> ${balance:.2f}"
-
-    # Determine status class based on balance
-    if balance < 5:
-        cls = "zen-low"  # Red: critically low
-    elif balance < 10:
-        cls = "zen-medium"  # Yellow: getting low
-    else:
-        cls = "zen-high"  # Green: good balance
-
-    # Build tooltip
-    tooltip = (
-        f"OpenCode Zen Balance\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"Balance: ${balance:.2f} USD\n"
-        f"\n"
-        f"Click to refresh"
-    )
-
-    output = {
-        "text": text,
-        "tooltip": tooltip,
-        "class": cls,
-        "alt": f"${balance:.2f}",
-    }
-
-    print(json.dumps(output))
-
-
 # ==================== CLI Entry Point ====================
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Fetch OpenCode Zen balance for Waybar or CLI"
-    )
-    parser.add_argument(
-        "--waybar",
-        action="store_true",
-        help="Output in JSON format for Waybar custom module",
-    )
+    parser = argparse.ArgumentParser(description="Print OpenCode Zen balance to terminal.")
     parser.add_argument(
         "--browser",
         action="append",
@@ -189,42 +145,10 @@ def main() -> None:
     try:
         balance_data = get_zen_balance(args.browser)
     except Exception as e:
-        if args.waybar:
-            err_msg = str(e)
-            err_lower = err_msg.lower()
-            is_http_auth = "403" in err_msg or "401" in err_msg
-            is_cookie = "cookie" in err_lower
-            short_err = (
-                "Auth Err"
-                if (is_http_auth or is_cookie)
-                else "Net Err"
-                if "failed" in err_lower or "timed out" in err_lower
-                else "Err"
-            )
-            tooltip = f"Error fetching Zen balance:\n{err_msg}"
-            if is_http_auth:
-                if open_login_url(LOGIN_URLS["opencode.ai"]):
-                    tooltip += "\n\nOpened login page — log in then click to refresh"
-            else:
-                tooltip += "\n\nMake sure you're logged into opencode.ai/zen"
-            print(
-                json.dumps(
-                    {
-                        "text": f"<span foreground='#ff5555'>ZEN {short_err}</span>",
-                        "tooltip": tooltip,
-                        "class": "critical",
-                    }
-                )
-            )
-            sys.exit(0)
-        else:
-            print(f"[!] Critical Error: {e}", file=sys.stderr)
-            sys.exit(1)
+        print(f"[!] {e}", file=sys.stderr)
+        sys.exit(1)
 
-    if args.waybar:
-        print_waybar(balance_data)
-    else:
-        print_cli(balance_data)
+    print_cli(balance_data)
 
 
 if __name__ == "__main__":

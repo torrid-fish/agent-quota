@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import urllib.request
 import urllib.error
 from pathlib import Path
 
-from common import format_eta, format_output, get_cached_or_fetch
+from common import format_eta, get_cached_or_fetch
 
 
 # ==================== Configuration ====================
 
 CONFIG_PATH = Path("~/.config/waybar-ai-usage/zai.conf").expanduser()
-ZAI_ICON = "Z"
-ZAI_COLOR = "#126EF4"
 API_BASE = "https://api.z.ai"
 QUOTA_URL = f"{API_BASE}/api/monitor/usage/quota/limit"
 
@@ -112,7 +109,7 @@ def _format_ms_reset(ms: int | None) -> str:
     return format_eta(ms // 1000)
 
 
-# ==================== Output: CLI / Waybar ====================
+# ==================== Output: CLI ====================
 
 
 def print_cli(quota: dict) -> None:
@@ -138,121 +135,11 @@ def print_cli(quota: dict) -> None:
             print(f"  - {code}: {usage}")
 
 
-def print_waybar(
-    quota: dict,
-    format_str: str | None = None,
-    tooltip_format: str | None = None,
-) -> None:
-    tl = quota.get("token_limit")
-    ml = quota.get("time_limit")
-
-    pct = tl.get("percentage", 0) if tl else 0
-    reset_str = _format_ms_reset(tl.get("nextResetTime")) if tl else "??"
-
-    is_ready = pct == 0 and tl is not None
-    is_exhausted = pct >= 100
-
-    if is_exhausted:
-        status = "Pause"
-    elif is_ready:
-        status = "Ready"
-    else:
-        status = ""
-
-    icon_styled = f"<span foreground='{ZAI_COLOR}' size='large'>{ZAI_ICON}</span>"
-    time_icon_styled = f"<span foreground='{ZAI_COLOR}' size='large'>\U000f051a</span>"
-
-    data = {
-        "icon": icon_styled,
-        "icon_plain": ZAI_ICON,
-        "time_icon": time_icon_styled,
-        "time_icon_plain": "\U000f051a",
-        "pct": pct,
-        "reset": reset_str,
-        "status": status,
-    }
-
-    if ml:
-        ml_pct = ml.get("percentage", 0)
-        ml_remaining = ml.get("remaining", 0)
-        ml_reset = _format_ms_reset(ml.get("nextResetTime"))
-        data["tools_pct"] = ml_pct
-        data["tools_remaining"] = ml_remaining
-        data["tools_reset"] = ml_reset
-
-    if format_str:
-        text = format_output(format_str, data)
-    else:
-        if status == "Pause":
-            text = f"{icon_styled} Pause"
-        elif status == "Ready":
-            text = f"{icon_styled} Ready"
-        else:
-            text = f"{icon_styled} {pct}% {time_icon_styled} {reset_str}"
-
-    if tooltip_format:
-        tooltip = format_output(tooltip_format, data)
-    else:
-        lines = [
-            "Window     Used    Reset",
-            "\u2501" * 24,
-        ]
-        if tl:
-            lines.append(f"Tokens     {pct:>3}%    {reset_str}")
-        if ml:
-            ml_pct = ml.get("percentage", 0)
-            ml_reset = _format_ms_reset(ml.get("nextResetTime"))
-            lines.append(f"Tools      {ml_pct:>3}%    {ml_reset}")
-            for d in ml.get("usageDetails", []):
-                code = d.get("modelCode", "?")
-                usage = d.get("usage", 0)
-                lines.append(f"  \u2022 {code:<12} {_format_tokens(usage)}")
-        lines.append("")
-        lines.append("Click to Refresh")
-        tooltip = "\n".join(lines)
-
-    if pct < 50:
-        cls = "zai-low"
-    elif pct < 80:
-        cls = "zai-mid"
-    else:
-        cls = "zai-high"
-
-    output = {
-        "text": text,
-        "tooltip": tooltip,
-        "class": cls,
-        "percentage": pct,
-    }
-    print(json.dumps(output))
-
-
 # ==================== CLI Entry Point ====================
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Show Z.ai usage in Waybar",
-    )
-    parser.add_argument(
-        "--waybar",
-        action="store_true",
-        help="Output in JSON format for Waybar custom module",
-    )
-    parser.add_argument(
-        "--format",
-        type=str,
-        help=(
-            "Custom format string for waybar text. Available: {icon}, {icon_plain}, "
-            "{pct}, {reset}, {status}, {tools_pct}, {tools_remaining}, {tools_reset}. "
-            "Example: '{icon_plain} {pct}%%'"
-        ),
-    )
-    parser.add_argument(
-        "--tooltip-format",
-        type=str,
-        help="Custom format string for tooltip. Uses same variables as --format.",
-    )
+    parser = argparse.ArgumentParser(description="Print Z.ai usage to terminal.")
     parser.add_argument(
         "--config",
         type=Path,
@@ -265,56 +152,20 @@ def main() -> None:
     token = config["ZAI_TOKEN"]
 
     if not token:
-        if args.waybar:
-            print(json.dumps({
-                "text": f"<span foreground='#ff5555'>{ZAI_ICON} No Token</span>",
-                "tooltip": (
-                    f"No ZAI_TOKEN found in {args.config}\n"
-                    f"1. Go to https://z.ai and log in\n"
-                    f"2. Open DevTools (F12) > Network tab\n"
-                    f"3. Find a request to api.z.ai and copy the Authorization header\n"
-                    f"4. Save as ZAI_TOKEN=eyJ... in {args.config}"
-                ),
-                "class": "critical",
-            }))
-            sys.exit(0)
-        else:
-            print(
-                f"[!] Error: No ZAI_TOKEN in {args.config}",
-                file=sys.stderr,
-            )
-            print(
-                f"    Create config: mkdir -p ~/.config/waybar-ai-usage",
-                file=sys.stderr,
-            )
-            print(
-                f"    Then add: ZAI_TOKEN=your_token_here",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        print(f"[!] No ZAI_TOKEN in {args.config}", file=sys.stderr)
+        print(f"    1. Log into https://z.ai", file=sys.stderr)
+        print(f"    2. Open DevTools (F12) > Network tab", file=sys.stderr)
+        print(f"    3. Copy the Authorization header from any api.z.ai request", file=sys.stderr)
+        print(f"    4. Save ZAI_TOKEN=eyJ... in {args.config}", file=sys.stderr)
+        sys.exit(1)
 
     try:
         quota = get_zai_quota(token)
     except Exception as e:
-        if args.waybar:
-            err_msg = str(e)
-            is_auth = "401" in err_msg or "403" in err_msg
-            short_err = "Auth Err" if is_auth else "Net Err"
-            tooltip = f"Error fetching Z.ai quota:\n{err_msg}"
-            print(json.dumps({
-                "text": f"<span foreground='#ff5555'>{ZAI_ICON} {short_err}</span>",
-                "tooltip": tooltip,
-                "class": "critical",
-            }))
-            sys.exit(0)
-        else:
-            print(f"[!] Critical Error: {e}", file=sys.stderr)
-            sys.exit(1)
+        print(f"[!] {e}", file=sys.stderr)
+        sys.exit(1)
 
-    if args.waybar:
-        print_waybar(quota, args.format, args.tooltip_format)
-    else:
-        print_cli(quota)
+    print_cli(quota)
 
 
 if __name__ == "__main__":
