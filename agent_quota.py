@@ -114,12 +114,35 @@ class ProviderStatus:
 # ===== Adapters: provider raw dict -> Metric list =====
 
 
+def _pad_reset(eta_str: str) -> str:
+    """Pad ETA string to fixed width with zero-padding on numbers (e.g., '1h01m' -> '01h01m', '1d' -> '01d', '4d21h' -> '04d21h')."""
+    import re
+    if eta_str == "—" or eta_str.startswith("0′"):
+        return eta_str
+    match = re.match(r'^(\d+)([a-z])(\d*)([a-z]?)$', eta_str)
+    if not match:
+        return eta_str
+    val1, unit1, val2, unit2 = match.groups()
+    val1 = int(val1)
+    val2 = int(val2) if val2 else 0
+    
+    if unit1 == "d":
+        suffix = f"{val2:02d}{unit2}" if val2 else ""
+        return f"{val1:02d}d{suffix}"
+    elif unit1 == "h":
+        return f"{val1:02d}h{val2:02d}m"
+    elif unit1 == "m":
+        return f"{val1:02d}m"
+    else:
+        return eta_str
+
+
 def _window_reset(win) -> str:
     if not win.resets_at:
         return "—"
     if win.utilization == 0:
         return "—"
-    return format_eta(win.resets_at)
+    return _pad_reset(format_eta(win.resets_at))
 
 
 def _adapt_claude(raw: dict) -> list[Metric]:
@@ -146,10 +169,10 @@ def _adapt_codex(raw: dict) -> list[Metric]:
 
 
 def _copilot_reset() -> str:
-    # Premium quota refills at the start of each calendar month (UTC).
-    now = datetime.now(timezone.utc)
-    year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
-    return format_eta(datetime(year, month, 1, tzinfo=timezone.utc).isoformat())
+     # Premium quota refills at the start of each calendar month (UTC).
+     now = datetime.now(timezone.utc)
+     year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
+     return _pad_reset(format_eta(datetime(year, month, 1, tzinfo=timezone.utc).isoformat()))
 
 
 def _adapt_copilot_factory(quota: int):
@@ -176,9 +199,9 @@ def _fmt_tokens(v: float | int) -> str:
 
 
 def _ms_reset(ms: int | None) -> str:
-    if not ms:
-        return "—"
-    return format_eta(ms // 1000)
+     if not ms:
+         return "—"
+     return _pad_reset(format_eta(ms // 1000))
 
 
 def _adapt_zai(raw: dict) -> list[Metric]:
@@ -210,24 +233,24 @@ def _adapt_zen(raw: dict) -> list[Metric]:
 
 
 def _adapt_go(raw: dict) -> list[Metric]:
-    rows = [
-        ("5h", "rollingUsage"),
-        ("Weekly", "weeklyUsage"),
-        ("Monthly", "monthlyUsage"),
-    ]
-    windows = raw.get("windows") or {}
-    metrics: list[Metric] = []
-    for label, key in rows:
-        w = windows.get(key)
-        if not w:
-            continue
-        pct = float(w["usage_percent"])
-        if pct == 0 or not w["reset_in_sec"]:
-            reset = "—"
-        else:
-            reset = format_eta(time.time() + w["reset_in_sec"])
-        metrics.append(Metric(label, f"{pct:.0f}%", pct, reset))
-    return metrics
+     rows = [
+         ("5h", "rollingUsage"),
+         ("Weekly", "weeklyUsage"),
+         ("Monthly", "monthlyUsage"),
+     ]
+     windows = raw.get("windows") or {}
+     metrics: list[Metric] = []
+     for label, key in rows:
+         w = windows.get(key)
+         if not w:
+             continue
+         pct = float(w["usage_percent"])
+         if pct == 0 or not w["reset_in_sec"]:
+             reset = "—"
+         else:
+             reset = _pad_reset(format_eta(time.time() + w["reset_in_sec"]))
+         metrics.append(Metric(label, f"{pct:.0f}%", pct, reset))
+     return metrics
 
 
 def _find_nested_value(raw, keys: set[str]):
@@ -798,9 +821,78 @@ def _usage_cell(metric: Metric):
     return _UsageBar(metric.pct, metric.value)
 
 
+class _WindowUsageLine:
+    """Single-line usage bar/value with window label on the left."""
+
+    def __init__(self, metric: Metric, label_width: int) -> None:
+        self.metric = metric
+        self.label_width = max(0, label_width)
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        width = options.max_width
+        if width <= 0:
+            yield Text("")
+            return
+
+        label_width = min(self.label_width, max(0, width - 1))
+        bar_width = max(0, width - label_width - 1)
+
+        # Left side: label (right-justified within its width)
+        label = self.metric.label
+        if label_width > 0 and len(label) > label_width:
+            label = label[: max(1, label_width - 1)] + "…"
+        label = label.rjust(label_width)
+        left = Text(label, style="dim")
+
+        # Right side: bar/value into the allocated bar width
+        if bar_width <= 0:
+            right = Text("")
+        elif self.metric.pct is None:
+            value = self.metric.value
+            if len(value) > bar_width:
+                value = value[: max(0, bar_width - 1)] + "…" if bar_width >= 2 else "…"
+            right = Text(value)
+            if len(right.plain) < bar_width:
+                right.append(" " * (bar_width - len(right.plain)))
+        else:
+            bar = _UsageBar(self.metric.pct, self.metric.value)
+            bar_iter = bar.__rich_console__(
+                console, options.update(max_width=bar_width)
+            )
+            bar_text = next(iter(bar_iter), Text(""))
+            # _UsageBar always yields a single Text.
+            right = bar_text if isinstance(bar_text, Text) else Text(str(bar_text))
+            if len(right.plain) < bar_width:
+                right.append(" " * (bar_width - len(right.plain)))
+
+        result = Text()
+        if label_width > 0:
+            result.append_text(left)
+            result.append(" ")
+        result.append_text(right)
+        yield result
+
+    def __rich_measure__(
+        self, console: Console, options: ConsoleOptions
+    ) -> Measurement:
+        bar_min = (
+            max(len(self.metric.value) + 4, 12)
+            if self.metric.pct is not None
+            else min(max(len(self.metric.value), 4), 12)
+        )
+        minimum = bar_min + (1 + self.label_width if self.label_width else 0)
+        maximum = max(minimum, options.max_width)
+        return Measurement(minimum, maximum)
+
+
 def _render_table(
     statuses: list[ProviderStatus], *, title: str, label_header: str, value_header: str
 ) -> Table:
+    label_width = min(
+        12, max((len(m.label) for s in statuses for m in s.metrics), default=0)
+    )
     table = Table(
         title=title,
         title_style="bold",
@@ -809,16 +901,13 @@ def _render_table(
         expand=True,
     )
     # vertical="middle" lets the single-line Provider/Plan/User/Reset cells sit
-    # centered next to multi-line Window/Usage cells when a provider has
+    # centered next to multi-line Usage cells when a provider has
     # multiple metrics (e.g. Claude's 5h + 7d).
     table.add_column(
         Text("Provider", justify="center"), no_wrap=True, vertical="middle"
     )
     table.add_column(Text("Plan", justify="center"), no_wrap=True, vertical="middle")
     table.add_column(Text("User", justify="center"), no_wrap=True, vertical="middle")
-    table.add_column(
-        Text(label_header, justify="center"), no_wrap=True, vertical="middle"
-    )
     # Custom Text header so we can center "Usage" without setting
     # justify="center" on the column itself — that would shrink the _UsageBar
     # to its measured minimum and pad around it instead of filling the column.
@@ -843,7 +932,6 @@ def _render_table(
                 s.name,
                 state,
                 "—",
-                "—",
                 Text(s.error or "(no detail)", style="dim"),
                 "—",
                 end_section=end_section,
@@ -854,7 +942,6 @@ def _render_table(
                 s.name,
                 s.plan or "Unknown",
                 s.user or "—",
-                "—",
                 Text("no data", style="dim"),
                 "—",
                 end_section=end_section,
@@ -867,9 +954,8 @@ def _render_table(
         # down on its own, which leaves the name stuck at the top).
         n = len(s.metrics)
         pad = "\n" * (n // 2)
-        windows = Text("\n".join(m.label for m in s.metrics))
         resets = Text("\n".join(m.reset for m in s.metrics))
-        usage = Group(*(_usage_cell(m) for m in s.metrics))
+        usage = Group(*(_WindowUsageLine(m, label_width) for m in s.metrics))
         name_cell = Text(pad + s.name)
         plan_cell = Text(pad + (s.plan or "Unknown"))
         user_cell = Text(pad + (s.user or "—"))
@@ -877,7 +963,6 @@ def _render_table(
             name_cell,
             plan_cell,
             user_cell,
-            windows,
             usage,
             resets,
             end_section=end_section,
