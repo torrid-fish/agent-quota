@@ -557,6 +557,54 @@ def _render_table(
     return table
 
 
+def _render_payg_table(statuses: list[ProviderStatus]) -> Table:
+    table = Table(
+        title="Pay-As-You-Go Quota",
+        title_style="bold",
+        show_header=True,
+        header_style="bold cyan",
+        expand=True,
+    )
+    table.add_column(
+        Text("Provider", justify="center"), no_wrap=True, vertical="middle"
+    )
+    table.add_column(
+        Text("Quota", justify="center"),
+        ratio=1,
+        min_width=14,
+        overflow="ellipsis",
+        vertical="middle",
+    )
+
+    last_idx = len(statuses) - 1
+    for s_idx, s in enumerate(statuses):
+        end_section = s_idx != last_idx
+        if s.state != "ok":
+            err_style = _STATE_STYLE[s.state]
+            label = _STATE_LABEL[s.state]
+            detail = s.error or "(no detail)"
+            table.add_row(
+                s.name,
+                Text(f"{label} — {detail}", style=err_style),
+                end_section=end_section,
+            )
+            continue
+        if not s.metrics:
+            table.add_row(s.name, Text("no data", style="dim"), end_section=end_section)
+            continue
+        # Single-metric providers (Zen today) just show the value; multi-metric
+        # providers stack "<label>  <value>" lines so the label still
+        # disambiguates rows.
+        if len(s.metrics) == 1:
+            quota_cell = Text(s.metrics[0].value)
+        else:
+            quota_cell = Text(
+                "\n".join(f"{m.label}  {m.value}" for m in s.metrics)
+            )
+        table.add_row(s.name, quota_cell, end_section=end_section)
+    return table
+
+
 def render_tables(statuses: list[ProviderStatus]):
     usage_statuses = [s for s in statuses if s.mode == "usage"]
     payg_statuses = [s for s in statuses if s.mode == "payg"]
@@ -571,14 +619,7 @@ def render_tables(statuses: list[ProviderStatus]):
             )
         )
     if payg_statuses:
-        tables.append(
-            _render_table(
-                payg_statuses,
-                title="Pay-As-You-Go Quota",
-                label_header="Metric",
-                value_header="Quota",
-            )
-        )
+        tables.append(_render_payg_table(payg_statuses))
     if not tables:
         return _render_table(
             [],
@@ -642,7 +683,7 @@ def main() -> int:
 
     interval = max(1, args.watch)
     try:
-        with Live(console=console, refresh_per_second=4, screen=False) as live:
+        with Live(console=console, refresh_per_second=4, screen=True) as live:
             while True:
                 statuses = fetch_all(providers, browsers)
                 live.update(render_tables(statuses))
