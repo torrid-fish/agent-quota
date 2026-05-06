@@ -9,6 +9,7 @@ A terminal app (`agent-quota`) that prints a table of current quota across **Cla
 ## Mental model
 
 - `agent_quota.py` is the orchestrator: imports each provider's `get_*_usage()` / `get_*_quota()` directly, runs them in parallel via `ThreadPoolExecutor`, normalizes results into `ProviderStatus(metrics: list[Metric])`, renders with `rich.table.Table`.
+- The Usage cell is **not** a Rich primitive — it's a custom renderable `_UsageBar` that implements `__rich_console__` + `__rich_measure__`. At render time Rich passes the column's allocated width via `options.max_width`, and `_UsageBar` paints a coloured bar (white-on-colour for filled, colour-on-grey23 for empty) with the metric value text centred across both portions. This is why `Metric` carries both `pct` (drives bar fill) and `value` (drives the overlay text) — the adapters in `agent_quota.py` shape the value text per provider so it's meaningful when overlaid (e.g. `"30%"`, `"0 / 300"`, `"1.2K / 5.0M"`).
 - Five provider scripts (`claude.py`, `codex.py`, `copilot.py`, `zen.py`, `zai.py`) at repo root. Each one is data-fetch + a tiny `print_cli()` debug `main()`. They depend only on `common.py`.
 - `common.py` is the contract layer: `load_cookies` (multi-browser fallback), `get_cached_or_fetch` (file cache + cross-process `.updating` marker), `format_eta`, `parse_window_*`.
 
@@ -20,10 +21,10 @@ A provider script never imports another provider. The orchestrator (`agent_quota
 |------|-------|------|
 | `agent_quota.py` | ~500 | Orchestrator: parallel fetch, adapters, Rich rendering (`_UsageBar` overlay), `--watch` loop, setup picker, config.toml I/O |
 | `common.py` | ~250 | `load_cookies`, `get_cached_or_fetch`, `format_eta`, `parse_window_*` |
-| `claude.py`, `codex.py` | ~110 each | Cookie-auth providers (claude.ai, chatgpt.com) |
-| `copilot.py` | ~230 | PAT-auth via `urllib`; Chrome-cookie HTML-scrape fallback for org-managed accounts |
-| `zai.py` | ~150 | API-token-auth via `urllib`; JWT must be copied from DevTools |
-| `zen.py` | ~130 | Cookie-auth provider (opencode.ai); HTML-scraped balance |
+| `claude.py`, `codex.py` | ~115 each | Cookie-auth providers (claude.ai, chatgpt.com) |
+| `copilot.py` | ~240 | PAT-auth via `urllib`; Chrome-cookie HTML-scrape fallback for org-managed accounts |
+| `zai.py` | ~170 | API-token-auth via `urllib`; JWT must be copied from DevTools |
+| `zen.py` | ~155 | Cookie-auth provider (opencode.ai); HTML-scraped balance |
 
 ## The provider contract
 
@@ -88,16 +89,19 @@ That's it — no UI orchestrator, no CSS, no JSON5 config writer.
 | Firefox uses XDG `~/.config/mozilla/firefox` | cookie-auth on newer distros | Firefox cookies not found | `_firefox_xdg_fallback` in `common.py` |
 | Z.ai JWT expires | `zai.py` | `Auth Err` after working for a while | User re-grabs token from DevTools |
 | Zen HTML changes | `zen.py` | Garbage balance (e.g. unix timestamp) | Tighten regex in `_parse_balance_from_html` |
+| `_UsageBar.__rich_measure__` returns `Measurement(0, 0)` | `--watch` mode (Live's first measure pass can pass `options.max_width=0`) | Bars silently disappear, Usage column collapses to 0 cells | Floor `minimum` at ~12 cells regardless of `options.max_width`; `Usage` column also has `min_width=14` as belt-and-braces. Don't undo either guard. |
 
 ## Development
 
 ```bash
-uv run agent-quota                  # default one-shot
+uv run agent-quota                  # default one-shot (reads config.toml)
+uv run agent-quota setup            # re-run the interactive picker
 uv run agent-quota --watch 5        # auto-refresh
-uv run python claude.py             # debug a single provider
+uv run agent-quota --only claude    # one-off subset, ignores config
+uv run python claude.py             # debug a single provider in isolation
 ```
 
-Python 3.11+ (uses `X | Y` union syntax). Zero global installs — always use `uv run`. No tests, no linter configured; correctness is verified by hand-running each provider against a real account.
+Python 3.11+ (uses `X | Y` union syntax and `tomllib`). Zero global installs — always use `uv run`. No tests, no linter configured; correctness is verified by hand-running each provider against a real account, and rendering changes are eyeballed in a real terminal (Rich falls back to plain text when piped, so `cat`/Bash output won't show colours).
 
 ## Distribution
 

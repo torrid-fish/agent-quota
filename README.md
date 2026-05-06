@@ -5,17 +5,23 @@ One command, one terminal table, your current quota across **Claude**, **OpenAI 
 ```
                                   agent-quota
 ┏━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
-┃ Provider ┃ Status   ┃ Window  ┃                              Usage ┃   Reset ┃
+┃ Provider ┃ Status   ┃ Window  ┃ Usage                              ┃   Reset ┃
 ┡━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
-│ Claude   │ OK       │ 5h      │                                23% │   1h17m │
-│          │          │ 7d      │                                23% │   5d02h │
-│ Codex    │ OK       │ 5h      │                                 0% │       — │
-│          │          │ Weekly  │                                 3% │   5d23h │
-│ Copilot  │ OK       │ Premium │                            0 / 300 │ monthly │
-│ Z.ai     │ OK       │ Tokens  │                       1.2K / 5.0M  │   2h08m │
-│ Zen      │ OK       │ Balance │                             $19.43 │       — │
+│ Claude   │ OK       │ 5h      │ ████████▓▓▓▓▓  23%  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │   1h17m │
+│          │          │ 7d      │ ████████▓▓▓▓▓  23%  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │   5d02h │
+├──────────┼──────────┼─────────┼────────────────────────────────────┼─────────┤
+│ Codex    │ OK       │ 5h      │ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓  0%  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │       — │
+│          │          │ Weekly  │ ▓▓▓▓▓▓▓▓▓▓▓▓▓  3%  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │   5d23h │
+├──────────┼──────────┼─────────┼────────────────────────────────────┼─────────┤
+│ Copilot  │ OK       │ Premium │ ▓▓▓▓▓▓▓▓▓▓▓  0 / 300  ▓▓▓▓▓▓▓▓▓▓▓▓ │ monthly │
+├──────────┼──────────┼─────────┼────────────────────────────────────┼─────────┤
+│ Z.ai     │ OK       │ Tokens  │ ███████▓▓▓▓ 1.2K / 5.0M  ▓▓▓▓▓▓▓▓▓ │   2h08m │
+├──────────┼──────────┼─────────┼────────────────────────────────────┼─────────┤
+│ Zen      │ OK       │ Balance │ $19.43                             │       — │
 └──────────┴──────────┴─────────┴────────────────────────────────────┴─────────┘
 ```
+
+The Usage column is a coloured progress bar that fills its allocated width with the metric value overlaid in the centre. Bar colour shifts at 70% (yellow) and 90% (red); rows without a percentage (e.g. Zen's balance) render as plain text. The table itself expands to fill the terminal width, so wider terminals get longer bars.
 
 Forked from [waybar-ai-usage](https://github.com/NihilDigit/waybar-ai-usage) — same providers, no Waybar / Wayland / Linux dependency. Just a terminal.
 
