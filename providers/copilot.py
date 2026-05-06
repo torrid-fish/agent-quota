@@ -20,6 +20,7 @@ CONFIG_PATH = Path("~/.config/agent-quota/copilot.conf").expanduser()
 DEFAULT_QUOTA = 300
 GITHUB_API_BASE = "https://api.github.com"
 COPILOT_FEATURES_URL = "https://github.com/settings/copilot/features"
+COPILOT_INDIVIDUAL_API_MARKER = "https://api.individual.githubcopilot.com"
 
 
 def load_copilot_config(config_path: Path | None = None) -> dict:
@@ -92,6 +93,11 @@ def _get_github_username(token: str) -> str:
     return username
 
 
+def _extract_copilot_identity(raw: dict) -> dict:
+    identity = raw.get("identity")
+    return dict(identity) if isinstance(identity, dict) else {}
+
+
 def _fetch_copilot_usage_uncached(token: str) -> dict:
     """Fetch Copilot premium request usage from GitHub API (not cached)."""
     username = _get_github_username(token)
@@ -105,7 +111,14 @@ def _fetch_copilot_usage_uncached(token: str) -> dict:
         usage_items = usage_data.get("usageItems", [])
 
     used = sum(item.get("grossQuantity", 0) for item in usage_items)
-    return {"used": round(used, 1), "raw": usage_data}
+    return {
+        "used": round(used, 1),
+        "raw": usage_data,
+        "identity": {
+            "user_name": username,
+            "source": "token",
+        },
+    }
 
 
 def _fetch_copilot_usage_from_browser() -> dict:
@@ -147,11 +160,20 @@ def _fetch_copilot_usage_from_browser() -> dict:
         r'Managed by\s*<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>',
         html,
     )
+    user_login = re.search(r'name="user-login"\s+content="([^"]+)"', html)
+    is_individual = COPILOT_INDIVIDUAL_API_MARKER in html
     return {
         "pct": float(pct_match.group(1)),
         "raw": {
             "managed_by_name": managed_by.group(2) if managed_by else None,
             "managed_by_href": managed_by.group(1) if managed_by else None,
+        },
+        "identity": {
+            "plan": "team" if managed_by else ("individual" if is_individual else ""),
+            "team_name": managed_by.group(2) if managed_by else "",
+            "team_href": managed_by.group(1) if managed_by else "",
+            "user_name": user_login.group(1) if user_login else "",
+            "source": "browser",
         },
         "source": f"{browser_name}:copilot-features",
     }
@@ -168,14 +190,27 @@ def get_copilot_usage(token: str | None) -> dict:
         return get_cached_or_fetch("copilot_browser", _fetch_copilot_usage_from_browser)
 
     if not token:
-        return fetch_browser()
+        data = fetch_browser()
+        if isinstance(data, dict) and not _extract_copilot_identity(data):
+            data = get_cached_or_fetch(
+                "copilot_browser", _fetch_copilot_usage_from_browser, ttl=0
+            )
+        return data
 
     try:
-        return get_cached_or_fetch("copilot", lambda: _fetch_copilot_usage_uncached(token))
+        data = get_cached_or_fetch("copilot", lambda: _fetch_copilot_usage_uncached(token))
     except Exception as exc:
         if not _should_fallback_to_browser(exc):
             raise
-        return fetch_browser()
+        data = fetch_browser()
+    if isinstance(data, dict) and not _extract_copilot_identity(data):
+        cache_name = "copilot" if token and data.get("used") is not None else "copilot_browser"
+        data = get_cached_or_fetch(
+            cache_name,
+            (lambda: _fetch_copilot_usage_uncached(token)) if token else _fetch_copilot_usage_from_browser,
+            ttl=0,
+        )
+    return data
 
 
 # ==================== Output: CLI ====================
@@ -190,12 +225,23 @@ def _next_month_reset_iso() -> str:
     return reset.isoformat()
 
 
-def print_cli(used: float, quota: int) -> None:
+def print_cli(usage: dict, quota: int) -> None:
     """Print usage to terminal (for debugging)."""
+    used = float(usage.get("used") or 0)
+    pct_from_usage = usage.get("pct")
+    if pct_from_usage is not None:
+        used = round(quota * float(pct_from_usage) / 100, 1)
     pct = round(used / quota * 100) if quota > 0 else 0
     reset_str = format_eta(_next_month_reset_iso())
+    identity = _extract_copilot_identity(usage)
     print(f"GitHub Copilot Premium Requests")
     print("-" * 40)
+    if identity.get("plan"):
+        print(f"Plan : {identity['plan']}")
+    if identity.get("team_name"):
+        print(f"Team : {identity['team_name']}")
+    if identity.get("user_name"):
+        print(f"User : {identity['user_name']}")
     print(f"Used : {used} / {quota} ({pct}%)")
     print(f"Reset: {reset_str} (next month, 1st at 00:00 UTC)")
 
@@ -218,10 +264,6 @@ def main() -> None:
 
     try:
         usage = get_copilot_usage(token)
-        used = usage.get("used", 0)
-        pct = usage.get("pct")
-        if pct is not None:
-            used = round(quota * float(pct) / 100, 1)
     except Exception as e:
         if not token:
             print(f"[!] No GITHUB_TOKEN in {args.config}", file=sys.stderr)
@@ -231,7 +273,7 @@ def main() -> None:
         print(f"[!] {e}", file=sys.stderr)
         sys.exit(1)
 
-    print_cli(used, quota)
+    print_cli(usage, quota)
 
 
 if __name__ == "__main__":

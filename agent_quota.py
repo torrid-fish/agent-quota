@@ -325,6 +325,14 @@ def _user_codex(raw: dict) -> str:
 
 
 def _plan_copilot(raw: dict) -> str:
+    identity = raw.get("identity") or {}
+    value = identity.get("plan")
+    plan = _format_plan_value(value)
+    team_name = identity.get("team_name")
+    if plan == "Team" and team_name:
+        return f"Team ({team_name})"
+    if plan != "Unknown":
+        return plan
     value = _find_nested_value(raw, {"plan", "plan_type", "subscription", "tier"})
     if value not in (None, ""):
         return _format_plan_value(value)
@@ -332,6 +340,11 @@ def _plan_copilot(raw: dict) -> str:
     if managed_by:
         return "Team"
     return "Unknown"
+
+
+def _user_copilot(raw: dict) -> str:
+    identity = raw.get("identity") or {}
+    return identity.get("user_name") or "Unknown"
 
 
 def _plan_zai(raw: dict) -> str:
@@ -483,7 +496,7 @@ def _build_providers() -> dict[str, _Provider]:
     users = {
         "claude": _user_claude,
         "codex": _user_codex,
-        "copilot": None,
+        "copilot": _user_copilot,
         "zai": None,
         "zen": None,
         "go": None,
