@@ -252,8 +252,13 @@ class _UsageBar:
         yield result
 
     def __rich_measure__(self, console: Console, options: ConsoleOptions) -> Measurement:
-        floor = min(options.max_width, len(self.value) + 4)
-        return Measurement(floor, options.max_width)
+        # Floor needs to be high enough that the bar still reads as a bar even
+        # when options.max_width is small or 0 (which happens during the first
+        # measure pass in Live mode). Returning Measurement(0, 0) here would
+        # collapse the column and make the bar disappear.
+        minimum = max(len(self.value) + 4, 12)
+        maximum = max(minimum, options.max_width)
+        return Measurement(minimum, maximum)
 
 
 def _usage_cell(metric: Metric):
@@ -273,7 +278,7 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
     table.add_column("Provider", no_wrap=True)
     table.add_column("Status", no_wrap=True)
     table.add_column("Window", no_wrap=True)
-    table.add_column("Usage", no_wrap=True, ratio=1, overflow="ellipsis")
+    table.add_column("Usage", no_wrap=True, ratio=1, min_width=14, overflow="ellipsis")
     table.add_column("Reset", justify="right", no_wrap=True)
 
     last_idx = len(statuses) - 1
