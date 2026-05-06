@@ -1,9 +1,9 @@
 # agent-quota
 
-One command, one terminal table, your current quota across **Claude**, **OpenAI Codex**, **GitHub Copilot**, **OpenCode Zen**, and **Z.ai**.
+One command, terminal tables for your current quota across **Claude**, **OpenAI Codex**, **GitHub Copilot**, **OpenCode Zen**, **OpenCode Go**, and **Z.ai**.
 
 ```
-                                  agent-quota
+                              Usage-Based Limits
 ┏━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┓
 ┃ Provider ┃ Status   ┃ Window  ┃ Usage                              ┃   Reset ┃
 ┡━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━┩
@@ -17,11 +17,17 @@ One command, one terminal table, your current quota across **Claude**, **OpenAI 
 ├──────────┼──────────┼─────────┼────────────────────────────────────┼─────────┤
 │ Z.ai     │ OK       │ Tokens  │ ███████▓▓▓▓ 1.2K / 5.0M  ▓▓▓▓▓▓▓▓▓ │   2h08m │
 ├──────────┼──────────┼─────────┼────────────────────────────────────┼─────────┤
-│ Zen      │ OK       │ Balance │ $19.43                             │       — │
 └──────────┴──────────┴─────────┴────────────────────────────────────┴─────────┘
+
+                             Pay-As-You-Go Quota
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Provider     ┃ Status   ┃ Metric  ┃ Quota                           ┃ Reset ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ OpenCode Zen │ OK       │ Balance │ $19.43                          │     — │
+└──────────────┴──────────┴─────────┴─────────────────────────────────┴───────┘
 ```
 
-The Usage column is a coloured progress bar that fills its allocated width with the metric value overlaid in the centre. Bar colour shifts at 70% (yellow) and 90% (red); rows without a percentage (e.g. Zen's balance) render as plain text. The table itself expands to fill the terminal width, so wider terminals get longer bars.
+Usage-based providers render in one table with per-slice windows and progress bars. At the moment that includes `Claude`, `Codex`, `Copilot`, `Z.ai`, and `OpenCode Go`. Pay-as-you-go providers render in a separate table with quota-style metrics such as balance or credits remaining; `OpenCode Zen` currently lives there. The usage bar fills its allocated width with the metric value overlaid in the centre. Bar colour shifts at 70% (yellow) and 90% (red); rows without a percentage render as plain text.
 
 Forked from [waybar-ai-usage](https://github.com/NihilDigit/waybar-ai-usage) — same providers, no Waybar / Wayland / Linux dependency. Just a terminal.
 

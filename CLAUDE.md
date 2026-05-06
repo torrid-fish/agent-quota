@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A terminal app (`agent-quota`) that prints a table of current quota across **Claude, OpenAI Codex, GitHub Copilot, OpenCode Zen, OpenCode Go, and Z.ai**. Forked from waybar-ai-usage; the Waybar layer is gone. One command, one table, exit. Optional `--watch` enters a Rich `Live` refresh loop.
+A terminal app (`agent-quota`) that prints current quota across **Claude, OpenAI Codex, GitHub Copilot, OpenCode Zen, OpenCode Go, and Z.ai**. Output is now split into two features: a **usage-based limits** table for slice/rate-limit style windows, and a **pay-as-you-go quota** table for balances / credits. Forked from waybar-ai-usage; the Waybar layer is gone. One command, render both sections, exit. Optional `--watch` enters a Rich `Live` refresh loop.
 
 ## Mental model
 
-- `agent_quota.py` is the orchestrator: imports each provider's `get_*_usage()` / `get_*_quota()` directly, runs them in parallel via `ThreadPoolExecutor`, normalizes results into `ProviderStatus(metrics: list[Metric])`, renders with `rich.table.Table`.
-- The Usage cell is **not** a Rich primitive — it's a custom renderable `_UsageBar` that implements `__rich_console__` + `__rich_measure__`. At render time Rich passes the column's allocated width via `options.max_width`, and `_UsageBar` paints a coloured bar (white-on-colour for filled, colour-on-grey23 for empty) with the metric value text centred across both portions. This is why `Metric` carries both `pct` (drives bar fill) and `value` (drives the overlay text) — the adapters in `agent_quota.py` shape the value text per provider so it's meaningful when overlaid (e.g. `"30%"`, `"0 / 300"`, `"1.2K / 5.0M"`).
+- `agent_quota.py` is the orchestrator: imports each provider's `get_*_usage()` / `get_*_quota()` directly, runs them in parallel via `ThreadPoolExecutor`, normalizes results into `ProviderStatus(metrics: list[Metric], mode: str)`, and renders one or two Rich tables depending on which provider categories are selected.
+- Providers are classified in `PROVIDER_META` as either `usage` or `payg`. That classification drives setup copy, row grouping, and which table a provider appears in.
+- The Usage / Quota value cell is **not** a Rich primitive when `Metric.pct` is present — it's a custom renderable `_UsageBar` that implements `__rich_console__` + `__rich_measure__`. At render time Rich passes the column's allocated width via `options.max_width`, and `_UsageBar` paints a coloured bar (white-on-colour for filled, colour-on-grey23 for empty) with the metric value text centred across both portions. This is why `Metric` carries both `pct` (drives bar fill) and `value` (drives the overlay text) — the adapters in `agent_quota.py` shape the value text per provider so it's meaningful when overlaid (e.g. `"30%"`, `"0 / 300"`, `"1.2K / 5.0M"`). Metrics without `pct` render as plain text, which is how pay-as-you-go balances such as Zen currently display.
 - Six provider scripts live under `providers/` (`claude.py`, `codex.py`, `copilot.py`, `zen.py`, `go.py`, `zai.py`). Each one is data-fetch + a tiny `print_cli()` debug `main()`. They depend only on `common.py` (which sits at the repo root, not inside the package, since it's shared with `agent_quota.py`).
 - `common.py` is the contract layer: `load_cookies` (multi-browser fallback), `get_cached_or_fetch` (file cache + cross-process `.updating` marker), `format_eta`, `parse_window_*`.
 
@@ -19,7 +20,7 @@ A provider script never imports another provider. The orchestrator (`agent_quota
 
 | File | Lines | Role |
 |------|-------|------|
-| `agent_quota.py` | ~500 | Orchestrator: parallel fetch, adapters, Rich rendering (`_UsageBar` overlay), `--watch` loop, setup picker, config.toml I/O |
+| `agent_quota.py` | ~500 | Orchestrator: parallel fetch, adapters, provider categorisation (`usage` vs `payg`), split Rich rendering (`_UsageBar` overlay), `--watch` loop, setup picker, config.toml I/O |
 | `common.py` | ~250 | `load_cookies`, `get_cached_or_fetch`, `format_eta`, `parse_window_*` |
 | `providers/claude.py`, `providers/codex.py` | ~115 each | Cookie-auth providers (claude.ai, chatgpt.com) |
 | `providers/copilot.py` | ~240 | PAT-auth via `urllib`; Chrome-cookie HTML-scrape fallback for org-managed accounts |
@@ -52,10 +53,15 @@ Reuse from `common.py` rather than rolling your own. `format_eta` accepts ISO 86
 
 A new `providers/<name>.py` requires touch-ups in **two places** (the package directory itself is already in `pyproject.toml`):
 
-1. `agent_quota.py`: add a `_fetch_<name>` lazy-import function (`from providers.<name> import …`), an adapter that turns raw dict → `list[Metric]`, an entry in `PROVIDER_META` (drives the setup picker and table row order), and corresponding entries in `_build_providers()`'s `fetchers` and `adapters` dicts.
+1. `agent_quota.py`: add a `_fetch_<name>` lazy-import function (`from providers.<name> import …`), an adapter that turns raw dict → `list[Metric]`, an entry in `PROVIDER_META` with the correct `mode` (`usage` or `payg`), and corresponding entries in `_build_providers()`'s `fetchers` and `adapters` dicts.
 2. The new `providers/<name>.py` itself, conforming to the provider contract above.
 
 That's it — no UI orchestrator, no CSS, no JSON5 config writer.
+
+Choose the `mode` based on what the numbers mean:
+
+- `usage`: the provider reports utilization against resettable slices/windows such as 5h, weekly, monthly, token buckets, or included request quotas.
+- `payg`: the provider reports a monetary / credit / prepaid balance where the main value is remaining quota rather than consumed percentage.
 
 ## Cross-cutting concerns
 
@@ -71,7 +77,7 @@ That's it — no UI orchestrator, no CSS, no JSON5 config writer.
 
 **Error UX**
 - `agent_quota.fetch_one` classifies exceptions into `auth_err` (HTTP 401/403/404, "cookie", "token", "lastActiveOrg") or `net_err` (everything else). The classification is a substring match on the error message — keep that hint set in sync with what providers actually raise.
-- Failed providers render a red/yellow status row with the first line of the error message; OK providers continue rendering normally.
+- Failed providers render a red/yellow status row with the first line of the error message inside their respective section; OK providers continue rendering normally.
 
 **Retry**
 - Cookie-auth providers (`providers/claude.py`, `providers/codex.py`, `providers/zen.py`, `providers/go.py`) retry once on failure (2 attempts, 10s timeout each).

@@ -24,15 +24,32 @@ from common import format_eta, parse_window_direct, parse_window_percent
 CONFIG_PATH = Path("~/.config/agent-quota/config.toml").expanduser()
 
 
+@dataclass(frozen=True)
+class ProviderMeta:
+    name: str
+    desc: str
+    mode: str  # usage | payg
+
+
 # Static metadata used by setup/picker. Keep ordered — setup walks this dict
-# in registration order, which is also the table row order.
-PROVIDER_META: dict[str, tuple[str, str]] = {
-    "claude": ("Claude", "Claude.ai 5h / 7d quota (browser cookies)"),
-    "codex": ("Codex", "ChatGPT Codex 5h / weekly quota (browser cookies)"),
-    "copilot": ("Copilot", "GitHub Copilot premium requests (PAT or browser cookies)"),
-    "zai": ("Z.ai", "Z.ai 5h tokens / monthly tools (API token)"),
-    "zen": ("OpenCode Zen", "OpenCode Zen balance (browser cookies)"),
-    "go": ("OpenCode Go", "OpenCode Go 5h / weekly / monthly usage (browser cookies)"),
+# in registration order, which is also the table row order within each section.
+PROVIDER_META: dict[str, ProviderMeta] = {
+    "claude": ProviderMeta(
+        "Claude", "Claude.ai 5h / 7d quota (browser cookies)", "usage"
+    ),
+    "codex": ProviderMeta(
+        "Codex", "ChatGPT Codex 5h / weekly quota (browser cookies)", "usage"
+    ),
+    "copilot": ProviderMeta(
+        "Copilot",
+        "GitHub Copilot premium requests (PAT or browser cookies)",
+        "usage",
+    ),
+    "zai": ProviderMeta("Z.ai", "Z.ai 5h tokens / monthly tools (API token)", "usage"),
+    "zen": ProviderMeta("OpenCode Zen", "OpenCode Zen balance (browser cookies)", "payg"),
+    "go": ProviderMeta(
+        "OpenCode Go", "OpenCode Go 5h / weekly / monthly usage (browser cookies)", "usage"
+    ),
 }
 
 
@@ -51,6 +68,7 @@ class Metric:
 class ProviderStatus:
     key: str
     name: str
+    mode: str
     state: str = "ok"  # ok | auth_err | net_err
     metrics: list[Metric] = field(default_factory=list)
     error: str = ""
@@ -222,6 +240,7 @@ def _fetch_go(browsers):
 @dataclass
 class _Provider:
     name: str
+    mode: str
     fetch: Callable[[list[str] | None], dict]
     adapt: Callable[[dict], list[Metric]]
 
@@ -249,7 +268,12 @@ def _build_providers() -> dict[str, _Provider]:
         "go": _fetch_go,
     }
     return {
-        key: _Provider(name=meta[0], fetch=fetchers[key], adapt=adapters[key])
+        key: _Provider(
+            name=meta.name,
+            mode=meta.mode,
+            fetch=fetchers[key],
+            adapt=adapters[key],
+        )
         for key, meta in PROVIDER_META.items()
     }
 
@@ -294,7 +318,9 @@ def run_setup() -> int:
 
     existing = (load_config() or {}).get("enabled") or list(PROVIDER_META)
     enabled: list[str] = []
-    for key, (name, desc) in PROVIDER_META.items():
+    for key, meta in PROVIDER_META.items():
+        name = meta.name
+        desc = meta.desc
         console.print(f"  [bold]{name:<8}[/]  [dim]{desc}[/]")
         if Confirm.ask(f"  Enable {name}?", default=key in existing):
             enabled.append(key)
@@ -366,7 +392,7 @@ def _classify(exc: Exception) -> str:
 
 
 def fetch_one(key: str, prov: _Provider, browsers: list[str] | None) -> ProviderStatus:
-    status = ProviderStatus(key=key, name=prov.name)
+    status = ProviderStatus(key=key, name=prov.name, mode=prov.mode)
     try:
         raw = prov.fetch(browsers)
     except Exception as exc:
@@ -454,9 +480,11 @@ def _usage_cell(metric: Metric):
     return _UsageBar(metric.pct, metric.value)
 
 
-def render_table(statuses: list[ProviderStatus]) -> Table:
+def _render_table(
+    statuses: list[ProviderStatus], *, title: str, label_header: str, value_header: str
+) -> Table:
     table = Table(
-        title="agent-quota",
+        title=title,
         title_style="bold",
         show_header=True,
         header_style="bold cyan",
@@ -469,12 +497,14 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
         Text("Provider", justify="center"), no_wrap=True, vertical="middle"
     )
     table.add_column(Text("Status", justify="center"), no_wrap=True, vertical="middle")
-    table.add_column(Text("Window", justify="center"), no_wrap=True, vertical="middle")
+    table.add_column(
+        Text(label_header, justify="center"), no_wrap=True, vertical="middle"
+    )
     # Custom Text header so we can center "Usage" without setting
     # justify="center" on the column itself — that would shrink the _UsageBar
     # to its measured minimum and pad around it instead of filling the column.
     table.add_column(
-        Text("Usage", justify="center"),
+        Text(value_header, justify="center"),
         no_wrap=True,
         ratio=1,
         min_width=14,
@@ -527,6 +557,40 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
     return table
 
 
+def render_tables(statuses: list[ProviderStatus]):
+    usage_statuses = [s for s in statuses if s.mode == "usage"]
+    payg_statuses = [s for s in statuses if s.mode == "payg"]
+    tables = []
+    if usage_statuses:
+        tables.append(
+            _render_table(
+                usage_statuses,
+                title="Usage-Based Limits",
+                label_header="Window",
+                value_header="Usage",
+            )
+        )
+    if payg_statuses:
+        tables.append(
+            _render_table(
+                payg_statuses,
+                title="Pay-As-You-Go Quota",
+                label_header="Metric",
+                value_header="Quota",
+            )
+        )
+    if not tables:
+        return _render_table(
+            [],
+            title="agent-quota",
+            label_header="Window",
+            value_header="Usage",
+        )
+    if len(tables) == 1:
+        return tables[0]
+    return Group(*tables)
+
+
 # ===== Main =====
 
 
@@ -573,7 +637,7 @@ def main() -> int:
 
     if args.watch is None:
         statuses = fetch_all(providers, browsers)
-        console.print(render_table(statuses))
+        console.print(render_tables(statuses))
         return 0 if all(s.state == "ok" for s in statuses) else 1
 
     interval = max(1, args.watch)
@@ -581,7 +645,7 @@ def main() -> int:
         with Live(console=console, refresh_per_second=4, screen=False) as live:
             while True:
                 statuses = fetch_all(providers, browsers)
-                live.update(render_table(statuses))
+                live.update(render_tables(statuses))
                 time.sleep(interval)
     except KeyboardInterrupt:
         return 0
