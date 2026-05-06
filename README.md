@@ -104,11 +104,12 @@ Results are cached in `~/.cache/agent-quota/<provider>.json` (TTL: 60s, Z.ai 120
 Each provider also has a standalone debug CLI:
 
 ```bash
-uv run python claude.py
-uv run python codex.py
-uv run python copilot.py
-uv run python zai.py
-uv run python zen.py
+uv run python -m providers.claude
+uv run python -m providers.codex
+uv run python -m providers.copilot
+uv run python -m providers.zai
+uv run python -m providers.zen
+uv run python -m providers.go
 ```
 
 These are useful for diagnosing a specific provider in isolation.

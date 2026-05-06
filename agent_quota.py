@@ -179,26 +179,26 @@ def _adapt_go(raw: dict) -> list[Metric]:
 
 
 def _fetch_claude(browsers):
-    from claude import get_claude_usage
+    from providers.claude import get_claude_usage
 
     return get_claude_usage(browsers)
 
 
 def _fetch_codex(browsers):
-    from codex import get_codex_usage
+    from providers.codex import get_codex_usage
 
     return get_codex_usage(browsers)
 
 
 def _fetch_copilot(browsers):
-    from copilot import get_copilot_usage, load_copilot_config
+    from providers.copilot import get_copilot_usage, load_copilot_config
 
     cfg = load_copilot_config()
     return get_copilot_usage(cfg.get("GITHUB_TOKEN"))
 
 
 def _fetch_zai(browsers):
-    from zai import get_zai_quota, load_zai_config
+    from providers.zai import get_zai_quota, load_zai_config
 
     cfg = load_zai_config()
     token = cfg.get("ZAI_TOKEN")
@@ -208,13 +208,13 @@ def _fetch_zai(browsers):
 
 
 def _fetch_zen(browsers):
-    from zen import get_zen_balance
+    from providers.zen import get_zen_balance
 
     return get_zen_balance(browsers)
 
 
 def _fetch_go(browsers):
-    from go import get_go_usage
+    from providers.go import get_go_usage
 
     return get_go_usage(browsers)
 
@@ -229,7 +229,7 @@ class _Provider:
 def _build_providers() -> dict[str, _Provider]:
     # Copilot quota lives in its own config file; load once so the adapter can
     # format used/quota.
-    from copilot import load_copilot_config
+    from providers.copilot import load_copilot_config
 
     copilot_quota = load_copilot_config().get("COPILOT_QUOTA") or 300
     adapters = {
