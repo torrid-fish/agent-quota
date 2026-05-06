@@ -7,10 +7,11 @@ import time
 import tomllib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from rich.console import Console, ConsoleOptions, RenderResult
+from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.live import Live
 from rich.measure import Measurement
 from rich.prompt import Confirm
@@ -82,15 +83,23 @@ def _adapt_codex(raw: dict) -> list[Metric]:
     ]
 
 
+def _copilot_reset() -> str:
+    # Premium quota refills at the start of each calendar month (UTC).
+    now = datetime.now(timezone.utc)
+    year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
+    return format_eta(datetime(year, month, 1, tzinfo=timezone.utc).isoformat())
+
+
 def _adapt_copilot_factory(quota: int):
     def adapt(raw: dict) -> list[Metric]:
+        reset = _copilot_reset()
         if "pct" in raw:
             pct = float(raw["pct"])
-            return [Metric("Premium", f"{pct:.0f}%", pct, "monthly")]
+            return [Metric("Premium", f"{pct:.0f}%", pct, reset)]
         used = float(raw.get("used", 0.0))
         pct = (used / quota * 100) if quota > 0 else None
         value = f"{used:g} / {quota}" if quota > 0 else f"{used:g}"
-        return [Metric("Premium", value, pct, "monthly")]
+        return [Metric("Premium", value, pct, reset)]
     return adapt
 
 
@@ -394,42 +403,52 @@ def render_table(statuses: list[ProviderStatus]) -> Table:
         header_style="bold cyan",
         expand=True,
     )
-    table.add_column("Provider", no_wrap=True)
-    table.add_column("Status", no_wrap=True)
-    table.add_column("Window", no_wrap=True)
-    table.add_column("Usage", no_wrap=True, ratio=1, min_width=14, overflow="ellipsis")
-    table.add_column("Reset", justify="right", no_wrap=True)
+    # vertical="middle" lets the single-line Provider/Status/Reset cells sit
+    # centered next to multi-line Window/Usage cells when a provider has
+    # multiple metrics (e.g. Claude's 5h + 7d).
+    table.add_column("Provider", no_wrap=True, vertical="middle")
+    table.add_column("Status", no_wrap=True, vertical="middle")
+    table.add_column("Window", no_wrap=True, vertical="middle")
+    # Custom Text header so we can center "Usage" without setting
+    # justify="center" on the column itself — that would shrink the _UsageBar
+    # to its measured minimum and pad around it instead of filling the column.
+    table.add_column(
+        Text("Usage", justify="center"),
+        no_wrap=True, ratio=1, min_width=14, overflow="ellipsis", vertical="middle",
+    )
+    table.add_column("Reset", justify="right", no_wrap=True, vertical="middle")
 
     last_idx = len(statuses) - 1
 
     for s_idx, s in enumerate(statuses):
-        is_last_provider = s_idx == last_idx
+        end_section = s_idx != last_idx
         state = Text(_STATE_LABEL[s.state], style=_STATE_STYLE[s.state])
 
         if s.state != "ok":
             table.add_row(
                 s.name, state, "—", Text(s.error or "(no detail)", style="dim"), "—",
-                end_section=not is_last_provider,
+                end_section=end_section,
             )
             continue
         if not s.metrics:
             table.add_row(
                 s.name, state, "—", Text("no data", style="dim"), "—",
-                end_section=not is_last_provider,
+                end_section=end_section,
             )
             continue
 
-        last_metric = len(s.metrics) - 1
-        for i, m in enumerate(s.metrics):
-            end_section = (i == last_metric) and not is_last_provider
-            table.add_row(
-                s.name if i == 0 else "",
-                state if i == 0 else "",
-                m.label,
-                _usage_cell(m),
-                m.reset,
-                end_section=end_section,
-            )
+        # Pad name/status with leading blank lines so they land on the visual
+        # middle row. For odd n this is the exact center; for even n it sits on
+        # the lower of the two middle rows (Rich's vertical="middle" rounds
+        # down on its own, which leaves the name stuck at the top).
+        n = len(s.metrics)
+        pad = "\n" * (n // 2)
+        windows = Text("\n".join(m.label for m in s.metrics))
+        resets = Text("\n".join(m.reset for m in s.metrics))
+        usage = Group(*(_usage_cell(m) for m in s.metrics))
+        name_cell = Text(pad + s.name)
+        state_cell = Text(pad) + state
+        table.add_row(name_cell, state_cell, windows, usage, resets, end_section=end_section)
     return table
 
 
