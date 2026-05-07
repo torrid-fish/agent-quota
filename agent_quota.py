@@ -285,9 +285,11 @@ def _format_plan_value(value) -> str:
     lowered = " ".join(word.lower() for word in text.split())
     known = {
         "pro": "Pro",
+        "prolite": "Pro Lite",
         "team": "Team",
         "plus": "Plus",
         "free": "Free",
+        "hc": "Enterprise",
         "enterprise": "Enterprise",
         "business": "Business",
         "individual": "Individual",

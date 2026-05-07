@@ -118,7 +118,14 @@ def get_codex_usage(browsers: list[str] | None = None) -> dict:
     Uses file-based caching to prevent multiple Waybar instances (one per monitor)
     from making concurrent API requests that might be rate-limited.
     """
-    return get_cached_or_fetch("codex", lambda: _fetch_codex_usage_uncached(browsers))
+    data = get_cached_or_fetch("codex", lambda: _fetch_codex_usage_uncached(browsers))
+    identity = extract_codex_identity(data) if isinstance(data, dict) else {}
+    if isinstance(data, dict) and not identity.get("plan"):
+        # Refresh immediately when a pre-identity or pre-plan cache entry is still fresh.
+        data = get_cached_or_fetch(
+            "codex", lambda: _fetch_codex_usage_uncached(browsers), ttl=0
+        )
+    return data
 
 
 # ================= Output: CLI =================
