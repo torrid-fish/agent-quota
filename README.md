@@ -8,7 +8,7 @@ One command, terminal tables for the AI products that matter when you live insid
 
 Pay-as-you-go balances are still supported, but as a secondary table for credits and prepaid balances such as `OpenCode Zen`, `OpenRouter`, and `DeepSeek`. The usage bar fills its allocated width with the metric value overlaid in the centre. Bar colour shifts at 70% (yellow) and 90% (red); rows without a percentage render as plain text. `Claude` now resolves plan, team, and user details from its account and organization endpoints; `Codex` resolves the subscription plan plus the signed-in user name from the ChatGPT session payload. Human-readable Codex team/workspace names are still limited by what that session payload exposes.
 
-Forked from [waybar-ai-usage](https://github.com/NihilDigit/waybar-ai-usage) — no Waybar / Wayland / Linux dependency. Just a terminal.
+Originally based on [waybar-ai-usage](https://github.com/NihilDigit/waybar-ai-usage) by [@NihilDigit](https://github.com/NihilDigit), now a standalone project — no Waybar / Wayland / Linux dependency. Just a terminal.
 
 ## Install
 
