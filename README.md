@@ -81,10 +81,15 @@ Org-managed Copilot accounts can omit `GITHUB_TOKEN` — the tool falls back to 
 
 ```ini
 # ~/.config/agent-quota/zai.conf
-ZAI_TOKEN=eyJ...              # JWT from DevTools (Network tab → api.z.ai → Authorization header)
+ZAI_TOKEN=eyJ...              # web JWT or GLM Coding Plan API key
 ```
 
-The Z.ai JWT can't be auto-refreshed; if it expires, copy a fresh one from DevTools.
+Works with two token shapes:
+
+- **Web session JWT** — open [z.ai](https://z.ai) → DevTools (F12) → Network → any `api.z.ai` request → copy the `Authorization` header **value only, without the `Bearer ` prefix**.
+- **GLM Coding Plan API key** — paste it directly.
+
+The monitor API expects the raw token (no `Bearer `), so the same `ZAI_TOKEN` field accepts either format. The web JWT can't be auto-refreshed; if it expires, copy a fresh one from DevTools. GLM Coding Plan keys are long-lived.
 
 ### OpenRouter config
 

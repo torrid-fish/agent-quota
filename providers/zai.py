@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import urllib.request
 import urllib.error
@@ -41,11 +42,16 @@ def load_zai_config(config_path: Path | None = None) -> dict:
 
 
 def _api_get(url: str, token: str) -> dict:
+    # Z.ai's monitor API expects the raw token in the Authorization header,
+    # without the "Bearer " prefix. GLM Coding Plan tokens are rejected
+    # with 401 otherwise.
     req = urllib.request.Request(
         url,
         headers={
-            "Authorization": f"Bearer {token}",
+            "Authorization": token,
             "Accept": "application/json",
+            "Accept-Language": "en-US,en",
+            "Content-Type": "application/json",
             "User-Agent": "agent-quota/zai",
         },
     )
@@ -153,10 +159,13 @@ def main() -> None:
 
     if not token:
         print(f"[!] No ZAI_TOKEN in {args.config}", file=sys.stderr)
-        print(f"    1. Log into https://z.ai", file=sys.stderr)
-        print(f"    2. Open DevTools (F12) > Network tab", file=sys.stderr)
-        print(f"    3. Copy the Authorization header from any api.z.ai request", file=sys.stderr)
-        print(f"    4. Save ZAI_TOKEN=eyJ... in {args.config}", file=sys.stderr)
+        print(f"    Web session JWT:", file=sys.stderr)
+        print(f"      1. Log into https://z.ai", file=sys.stderr)
+        print(f"      2. Open DevTools (F12) > Network tab", file=sys.stderr)
+        print(f"      3. Copy the Authorization header value from any api.z.ai", file=sys.stderr)
+        print(f"         request (strip the leading 'Bearer ')", file=sys.stderr)
+        print(f"    GLM Coding Plan API key: paste it directly.", file=sys.stderr)
+        print(f"    Then save ZAI_TOKEN=<token> in {args.config}", file=sys.stderr)
         sys.exit(1)
 
     try:
