@@ -115,6 +115,7 @@ def _fetch_codex_usage_uncached(browsers: list[str] | None = None) -> dict:
                         usage_data["identity"] = _extract_codex_identity(
                             usage_data, session_data
                         )
+                        usage_data["source"] = browser_name
                     return usage_data
                 except Exception as e:
                     last_error = e
@@ -134,7 +135,7 @@ def get_codex_usage(browsers: list[str] | None = None) -> dict:
     """
     data = get_cached_or_fetch("codex", lambda: _fetch_codex_usage_uncached(browsers))
     identity = extract_codex_identity(data) if isinstance(data, dict) else {}
-    if isinstance(data, dict) and not identity.get("plan"):
+    if isinstance(data, dict) and (not identity.get("plan") or not data.get("source")):
         # Refresh immediately when a pre-identity or pre-plan cache entry is still fresh.
         data = get_cached_or_fetch(
             "codex", lambda: _fetch_codex_usage_uncached(browsers), ttl=0

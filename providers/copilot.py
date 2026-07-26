@@ -145,7 +145,8 @@ def _fetch_copilot_usage_from_browser() -> dict:
     # id="copilot-overages-usage" section is gone. The usage now lives under
     # an "Included credits" heading followed by a "N / M AI credits" text and
     # a progress bar whose width style carries the percentage.
-    included_idx = html.find(">Included credits<")
+    included_match = re.search(r">Included\s+(?:credits|usage)<", html, re.IGNORECASE)
+    included_idx = included_match.start() if included_match else -1
     if included_idx < 0:
         raise RuntimeError(f"{browser_name}: no copilot usage section found")
 
