@@ -5,7 +5,12 @@ import sys
 
 from curl_cffi import requests
 
-from common import format_eta, get_cached_or_fetch, load_cookies, parse_window_percent
+from common import (
+    format_eta,
+    get_cached_or_fetch,
+    load_cookie_candidates,
+    parse_window_percent,
+)
 
 
 # ==================== Configuration ====================
@@ -19,6 +24,7 @@ BASE_HEADERS = {
     "Origin": "https://claude.ai",
     "Accept": "application/json, text/plain, */*",
 }
+CLAUDE_IMPERSONATIONS = ("chrome124", "edge", "safari")
 
 
 # ==================== Core Logic: Get Usage ====================
@@ -87,76 +93,84 @@ def extract_claude_identity(raw: dict) -> dict:
 def _fetch_claude_usage_uncached(browsers: list[str] | None = None) -> dict:
     """Internal function to fetch Claude usage data without caching"""
     try:
-        cookies, _browser = load_cookies(CLAUDE_DOMAIN, browsers)
+        cookie_candidates = load_cookie_candidates(CLAUDE_DOMAIN, browsers)
     except Exception as e:
         raise RuntimeError(f"Failed to read cookies: {e}")
 
-    org_id = cookies.get("lastActiveOrg")
-    if not org_id:
-        raise RuntimeError(
-            "Missing 'lastActiveOrg' in cookies.\n"
-            "Please refresh Claude page in browser or switch Organization."
-        )
+    errors: list[str] = []
+    for cookies, browser_name in cookie_candidates:
+        last_error = None
+        for _attempt in range(2):
+            for impersonate in CLAUDE_IMPERSONATIONS:
+                try:
+                    # Keep the same session for warm-up and API calls. This is
+                    # important for Claude's Cloudflare challenge cookie.
+                    http = requests.Session(impersonate=impersonate)
+                    http.cookies.update(cookies)
+                    http.get(
+                        f"https://{CLAUDE_DOMAIN}/",
+                        headers=BASE_HEADERS,
+                        timeout=10,
+                    )
 
-    usage_url = f"https://{CLAUDE_DOMAIN}/api/organizations/{org_id}/usage"
+                    orgs_resp = http.get(
+                        ORGANIZATIONS_URL,
+                        headers=BASE_HEADERS,
+                        timeout=10,
+                    )
+                    if orgs_resp.status_code == 403:
+                        raise RuntimeError(
+                            f"403 Forbidden from Claude organizations ({impersonate})"
+                        )
+                    orgs_resp.raise_for_status()
+                    organizations_data = orgs_resp.json()
 
-    # Retry once (2 attempts total)
-    last_error = None
-    for attempt in range(2):
-        try:
-            orgs_resp = requests.get(
-                ORGANIZATIONS_URL,
-                cookies=cookies,
-                headers=BASE_HEADERS,
-                impersonate="chrome",
-                timeout=10
-            )
-            if orgs_resp.status_code == 403:
-                raise RuntimeError("403 Forbidden: Try updating browser_cookie3 or refresh the page in browser.")
-            orgs_resp.raise_for_status()
-            organizations_data = orgs_resp.json()
+                    # Prefer the cookie, but recover when Claude renamed or
+                    # omitted lastActiveOrg from the browser cookie jar.
+                    org_id = cookies.get("lastActiveOrg")
+                    if not org_id:
+                        selected = _select_claude_org(organizations_data, None)
+                        org_id = selected.get("uuid") or selected.get("id")
+                    if not org_id:
+                        raise RuntimeError("Claude returned no organizations")
 
-            account_resp = requests.get(
-                ACCOUNT_URL,
-                cookies=cookies,
-                headers=BASE_HEADERS,
-                impersonate="chrome",
-                timeout=10
-            )
-            if account_resp.status_code == 403:
-                raise RuntimeError("403 Forbidden: Try updating browser_cookie3 or refresh the page in browser.")
-            account_resp.raise_for_status()
-            account_data = account_resp.json()
+                    account_resp = http.get(
+                        ACCOUNT_URL,
+                        headers=BASE_HEADERS,
+                        timeout=10,
+                    )
+                    if account_resp.status_code == 403:
+                        raise RuntimeError(
+                            f"403 Forbidden from Claude account ({impersonate})"
+                        )
+                    account_resp.raise_for_status()
+                    account_data = account_resp.json()
 
-            resp = requests.get(
-                usage_url,
-                cookies=cookies,
-                headers=BASE_HEADERS,
-                impersonate="chrome",
-                timeout=10
-            )
+                    resp = http.get(
+                        f"https://{CLAUDE_DOMAIN}/api/organizations/{org_id}/usage",
+                        headers=BASE_HEADERS,
+                        timeout=10,
+                    )
+                    if resp.status_code == 403:
+                        raise RuntimeError(
+                            f"403 Forbidden from Claude usage ({impersonate})"
+                        )
+                    resp.raise_for_status()
+                    usage_data = resp.json()
+                    if isinstance(usage_data, dict):
+                        usage_data["_organization_id"] = org_id
+                        usage_data["_organizations"] = organizations_data
+                        usage_data["_account"] = account_data
+                        usage_data["source"] = browser_name
+                        usage_data["identity"] = _extract_claude_identity(
+                            organizations_data, account_data, org_id
+                        )
+                    return usage_data
+                except Exception as exc:
+                    last_error = exc
+        errors.append(f"{browser_name}: {last_error}")
 
-            if resp.status_code == 403:
-                raise RuntimeError("403 Forbidden: Try updating browser_cookie3 or refresh the page in browser.")
-
-            resp.raise_for_status()
-            usage_data = resp.json()
-            if isinstance(usage_data, dict):
-                usage_data["_organization_id"] = org_id
-                usage_data["_organizations"] = organizations_data
-                usage_data["_account"] = account_data
-                usage_data["identity"] = _extract_claude_identity(
-                    organizations_data, account_data, org_id
-                )
-            return usage_data
-
-        except Exception as e:
-            last_error = e
-            if attempt == 0:  # First failure, retry
-                continue
-
-    # Both attempts failed
-    raise RuntimeError(f"Request failed: {last_error}")
+    raise RuntimeError("Claude authentication failed; " + "; ".join(errors))
 
 
 def get_claude_usage(browsers: list[str] | None = None) -> dict:
@@ -167,7 +181,7 @@ def get_claude_usage(browsers: list[str] | None = None) -> dict:
     from making concurrent API requests that might be rate-limited.
     """
     data = get_cached_or_fetch("claude", lambda: _fetch_claude_usage_uncached(browsers))
-    if isinstance(data, dict) and not data.get("identity"):
+    if isinstance(data, dict) and (not data.get("identity") or not data.get("source")):
         # Refresh immediately when a pre-identity cache entry is still fresh.
         data = get_cached_or_fetch(
             "claude", lambda: _fetch_claude_usage_uncached(browsers), ttl=0
