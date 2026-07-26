@@ -220,7 +220,8 @@ def print_cli(usage: dict) -> None:
             continue
         reset = format_eta(time.time() + w["reset_in_sec"]) if w["reset_in_sec"] else "—"
         status = "" if w["status"] == "ok" else f" [{w['status']}]"
-        print(f"{label:<8} : {w['usage_percent']:>3}%{status}  (Reset in {reset})")
+        remaining = max(0, 100 - w["usage_percent"])
+        print(f"{label:<8} : {remaining:>3}% remaining{status}  (Reset in {reset})")
 
 
 def main() -> None:

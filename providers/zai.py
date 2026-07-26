@@ -126,15 +126,15 @@ def print_cli(quota: dict) -> None:
     print("-" * 50)
 
     if tl:
-        pct = tl.get("percentage", 0)
+        pct = max(0, 100 - float(tl.get("percentage", 0)))
         reset = _format_ms_reset(tl.get("nextResetTime"))
-        print(f"5h Tokens : {pct}%  (Reset in {reset})")
+        print(f"5h Tokens remaining : {pct:.0f}%  (Reset in {reset})")
 
     if ml:
-        pct = ml.get("percentage", 0)
+        pct = max(0, 100 - float(ml.get("percentage", 0)))
         remaining = ml.get("remaining", 0)
         reset = _format_ms_reset(ml.get("nextResetTime"))
-        print(f"Monthly Tools: {pct}% ({remaining} remaining)")
+        print(f"Monthly Tools remaining: {pct:.0f}% ({remaining} remaining)")
         for d in ml.get("usageDetails", []):
             code = d.get("modelCode", "?")
             usage = d.get("usage", 0)

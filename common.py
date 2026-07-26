@@ -137,10 +137,13 @@ def _firefox_xdg_fallback(domain: str):
     return None
 
 
-def load_cookies(domain: str, browsers: Iterable[str] | None = None) -> tuple[dict, str]:
-    """Load cookies for a domain from the first available browser in order."""
+def load_cookie_candidates(
+    domain: str, browsers: Iterable[str] | None = None
+) -> list[tuple[dict, str]]:
+    """Load all non-empty cookie jars for a domain, in browser preference order."""
     browsers = list(browsers or DEFAULT_BROWSERS)
     errors: list[str] = []
+    candidates: list[tuple[dict, str]] = []
 
     for name in browsers:
         # First check if we have a local implementation (e.g., helium)
@@ -164,17 +167,26 @@ def load_cookies(domain: str, browsers: Iterable[str] | None = None) -> tuple[di
                 if cj is not None:
                     cookies = {c.name: c.value for c in cj}
                     if cookies:
-                        return cookies, name
+                        candidates.append((cookies, name))
+                        continue
             errors.append(f"{name}: {exc}")
             continue
 
         if cookies:
-            return cookies, name
+            candidates.append((cookies, name))
+            continue
 
         errors.append(f"{name}: no cookies found")
 
+    if candidates:
+        return candidates
     detail = "; ".join(errors) if errors else "no browsers provided"
     raise RuntimeError(f"Failed to read cookies for {domain}: {detail}")
+
+
+def load_cookies(domain: str, browsers: Iterable[str] | None = None) -> tuple[dict, str]:
+    """Load cookies for a domain from the first available browser in order."""
+    return load_cookie_candidates(domain, browsers)[0]
 
 
 @dataclass
@@ -251,5 +263,4 @@ def format_eta(reset_at: str | int | None) -> str:
     mins = secs // 60
     secs_rem = secs % 60
     return f"{mins}m{secs_rem:02}s"
-
 

@@ -5,7 +5,12 @@ import sys
 
 from curl_cffi import requests
 
-from common import format_eta, get_cached_or_fetch, load_cookies, parse_window_direct
+from common import (
+    format_eta,
+    get_cached_or_fetch,
+    load_cookie_candidates,
+    parse_window_direct,
+)
 
 
 # ================= Configuration =================
@@ -18,6 +23,7 @@ BASE_HEADERS = {
 
 SESSION_URL = "https://chatgpt.com/api/auth/session"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+CODEX_IMPERSONATIONS = ("chrome124", "edge", "safari")
 
 # ================= Network Logic =================
 
@@ -54,61 +60,69 @@ def extract_codex_identity(raw: dict) -> dict:
 def _fetch_codex_usage_uncached(browsers: list[str] | None = None) -> dict:
     """Internal function to fetch Codex usage data without caching"""
     try:
-        cookies_dict, _browser = load_cookies("chatgpt.com", browsers)
+        cookie_candidates = load_cookie_candidates("chatgpt.com", browsers)
     except Exception as e:
         raise RuntimeError(f"Failed to read browser cookies: {e}")
 
-    # Retry once (2 attempts total)
-    last_error = None
-    for attempt in range(2):
-        try:
-            # Get Access Token
-            session_resp = requests.get(
-                SESSION_URL,
-                cookies=cookies_dict,
-                headers=BASE_HEADERS,
-                impersonate="chrome",
-                timeout=10
-            )
+    # A browser may contain stale ChatGPT cookies while another browser has the
+    # active session. Validate each candidate through /api/auth/session before
+    # trying the usage endpoint, and retry transient failures once per candidate.
+    errors: list[str] = []
+    for cookies_dict, browser_name in cookie_candidates:
+        last_error = None
+        for attempt in range(2):
+            for impersonate in CODEX_IMPERSONATIONS:
+                session_data = None
+                try:
+                    # Keep the same connection/cookie jar for the browser
+                    # warm-up, session check, and usage request. Cloudflare
+                    # can issue a challenge cookie on the first request.
+                    http = requests.Session(impersonate=impersonate)
+                    http.cookies.update(cookies_dict)
+                    http.get(
+                        "https://chatgpt.com/",
+                        headers=BASE_HEADERS,
+                        timeout=10,
+                    )
+                    session_resp = http.get(
+                        SESSION_URL,
+                        headers=BASE_HEADERS,
+                        timeout=10,
+                    )
 
-            if session_resp.status_code == 403:
-                raise RuntimeError("403 Forbidden: Cloudflare blocked, check IP or update browser_cookie3")
+                    if session_resp.status_code == 403:
+                        raise RuntimeError(
+                            f"403 Forbidden from ChatGPT session endpoint ({impersonate})"
+                        )
 
-            session_resp.raise_for_status()
-            session_data = session_resp.json()
+                    session_resp.raise_for_status()
+                    session_data = session_resp.json()
+                    access_token = session_data.get("accessToken")
+                    if not access_token:
+                        raise RuntimeError("ChatGPT session has no accessToken")
 
-            access_token = session_data.get("accessToken")
-            if not access_token:
-                raise RuntimeError("accessToken not found in session response.")
+                    usage_headers = BASE_HEADERS.copy()
+                    usage_headers["Authorization"] = f"Bearer {access_token}"
+                    usage_resp = http.get(
+                        CODEX_USAGE_URL,
+                        headers=usage_headers,
+                        timeout=10,
+                    )
+                    usage_resp.raise_for_status()
+                    usage_data = usage_resp.json()
+                    if isinstance(usage_data, dict):
+                        # Keep the access token in memory only.
+                        usage_data["identity"] = _extract_codex_identity(
+                            usage_data, session_data
+                        )
+                    return usage_data
+                except Exception as e:
+                    last_error = e
+        errors.append(f"{browser_name}: {last_error}")
 
-            # Get Usage Data
-            usage_headers = BASE_HEADERS.copy()
-            usage_headers["Authorization"] = f"Bearer {access_token}"
-
-            usage_resp = requests.get(
-                CODEX_USAGE_URL,
-                cookies=cookies_dict,
-                headers=usage_headers,
-                impersonate="chrome",
-                timeout=10
-            )
-
-            usage_resp.raise_for_status()
-            usage_data = usage_resp.json()
-            if isinstance(usage_data, dict):
-                usage_data["_session"] = session_data
-                usage_data["identity"] = _extract_codex_identity(
-                    usage_data, session_data
-                )
-            return usage_data
-
-        except Exception as e:
-            last_error = e
-            if attempt == 0:  # First failure, retry
-                continue
-
-    # Both attempts failed
-    raise RuntimeError(f"Request failed: {last_error}")
+    if errors:
+        raise RuntimeError("Codex authentication failed; " + "; ".join(errors))
+    raise RuntimeError("Codex authentication failed: no cookie candidates")
 
 
 def get_codex_usage(browsers: list[str] | None = None) -> dict:
@@ -133,7 +147,6 @@ def get_codex_usage(browsers: list[str] | None = None) -> dict:
 
 def print_cli(usage: dict) -> None:
     rate = usage.get("rate_limit") or {}
-    p = parse_window_direct(rate.get("primary_window"))
     s = parse_window_direct(rate.get("secondary_window"))
     identity = extract_codex_identity(usage)
 
@@ -144,8 +157,7 @@ def print_cli(usage: dict) -> None:
         f"User              : "
         f"{identity.get('user_name') or identity.get('account_name') or 'Unknown'}"
     )
-    print(f"Primary   (Short): {p.utilization:>5.1f}% | Reset in {format_eta(p.resets_at)}")
-    print(f"Secondary (Long) : {s.utilization:>5.1f}% | Reset in {format_eta(s.resets_at)}")
+    print(f"Weekly          : {s.utilization:>5.1f}% | Reset in {format_eta(s.resets_at)}")
 
 
 def main() -> None:

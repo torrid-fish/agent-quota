@@ -41,7 +41,7 @@ PROVIDER_META: dict[str, ProviderMeta] = {
         "Claude", "Claude.ai 5h / 7d subscription windows (browser cookies)", "usage"
     ),
     "codex": ProviderMeta(
-        "Codex", "ChatGPT Codex 5h / weekly included usage (browser cookies)", "usage"
+        "Codex", "ChatGPT Codex weekly included usage (browser cookies)", "usage"
     ),
     "copilot": ProviderMeta(
         "Copilot",
@@ -97,6 +97,7 @@ class Metric:
     value: str
     pct: float | None = None
     reset: str = "—"
+    is_remaining: bool = False
 
 
 @dataclass
@@ -150,22 +151,33 @@ def _adapt_claude(raw: dict) -> list[Metric]:
     fh = parse_window_percent(raw.get("five_hour"))
     sd = parse_window_percent(raw.get("seven_day"))
     sn = parse_window_percent(raw.get("seven_day_sonnet"))
-    return [
-        Metric("5h", f"{fh.utilization:.0f}%", fh.utilization, _window_reset(fh)),
-        Metric("7d", f"{sd.utilization:.0f}%", sd.utilization, _window_reset(sd)),
-        Metric(
-            "7d Sonnet", f"{sn.utilization:.0f}%", sn.utilization, _window_reset(sn)
-        ),
-    ]
+    def remaining(label: str, win) -> Metric:
+        pct = max(0.0, min(100.0, 100.0 - win.utilization))
+        return Metric(
+            label,
+            f"{pct:.0f}%",
+            pct,
+            _window_reset(win),
+            is_remaining=True,
+        )
+
+    return [remaining("5h", fh), remaining("7d", sd), remaining("7d Sonnet", sn)]
 
 
 def _adapt_codex(raw: dict) -> list[Metric]:
     rate = raw.get("rate_limit") or {}
-    p = parse_window_direct(rate.get("primary_window"))
-    s = parse_window_direct(rate.get("secondary_window"))
+    # Codex currently exposes the weekly window as primary_window. The API
+    # reports used_percent, while the UI should show the remaining allowance.
+    weekly = parse_window_direct(rate.get("primary_window"))
+    remaining = max(0.0, min(100.0, 100.0 - weekly.utilization))
     return [
-        Metric("5h", f"{p.utilization:.0f}%", p.utilization, _window_reset(p)),
-        Metric("Weekly", f"{s.utilization:.0f}%", s.utilization, _window_reset(s)),
+        Metric(
+            "Weekly",
+            f"{remaining:.0f}%",
+            remaining,
+            _window_reset(weekly),
+            is_remaining=True,
+        )
     ]
 
 
@@ -182,12 +194,20 @@ def _adapt_copilot_factory(quota: int):
     def adapt(raw: dict) -> list[Metric]:
         reset = _copilot_reset()
         if "pct" in raw:
-            pct = float(raw["pct"])
-            return [Metric("Premium", f"{pct:.0f}%", pct, reset)]
+            used_pct = float(raw["pct"])
+            pct = max(0.0, min(100.0, 100.0 - used_pct))
+            used = raw.get("used")
+            total = raw.get("total")
+            if used is not None and total is not None:
+                remaining = max(0.0, float(total) - float(used))
+                value = f"{remaining:g} / {float(total):g}"
+            else:
+                value = f"{pct:.0f}%"
+            return [Metric("Premium", value, pct, reset, is_remaining=True)]
         used = float(raw.get("used", 0.0))
-        pct = (used / quota * 100) if quota > 0 else None
-        value = f"{used:g} / {quota}" if quota > 0 else f"{used:g}"
-        return [Metric("Premium", value, pct, reset)]
+        pct = (max(0.0, quota - used) / quota * 100) if quota > 0 else None
+        value = f"{max(0.0, quota - used):g} / {quota}" if quota > 0 else f"{used:g}"
+        return [Metric("Premium", value, pct, reset, is_remaining=quota > 0)]
 
     return adapt
 
@@ -211,21 +231,25 @@ def _adapt_zai(raw: dict) -> list[Metric]:
     metrics: list[Metric] = []
     tl = raw.get("token_limit")
     if tl:
-        pct = float(tl.get("percentage", 0))
+        used_pct = float(tl.get("percentage", 0))
+        pct = max(0.0, min(100.0, 100.0 - used_pct))
         used = tl.get("usedTokens") or tl.get("used") or 0
         total = tl.get("totalTokens") or tl.get("total") or 0
         if total:
-            value = f"{_fmt_tokens(used)} / {_fmt_tokens(total)}"
+            total_i = int(total)
+            used_i = int(used)
+            value = f"{_fmt_tokens(max(0, total_i - used_i))} / {_fmt_tokens(total_i)}"
         else:
             value = f"{pct:.0f}%"
-        metrics.append(Metric("Tokens", value, pct, _ms_reset(tl.get("nextResetTime"))))
+        metrics.append(Metric("Tokens", value, pct, _ms_reset(tl.get("nextResetTime")), is_remaining=True))
 
     ml = raw.get("time_limit")
     if ml:
-        pct = float(ml.get("percentage", 0))
+        used_pct = float(ml.get("percentage", 0))
+        pct = max(0.0, min(100.0, 100.0 - used_pct))
         remaining = ml.get("remaining")
-        value = f"{pct:.0f}%" if remaining is None else f"{pct:.0f}% ({remaining} left)"
-        metrics.append(Metric("Tools", value, pct, _ms_reset(ml.get("nextResetTime"))))
+        value = f"{pct:.0f}%" if remaining is None else f"{remaining} left"
+        metrics.append(Metric("Tools", value, pct, _ms_reset(ml.get("nextResetTime")), is_remaining=True))
 
     return metrics
 
@@ -247,12 +271,13 @@ def _adapt_go(raw: dict) -> list[Metric]:
         w = windows.get(key)
         if not w:
             continue
-        pct = float(w["usage_percent"])
-        if pct == 0 or not w["reset_in_sec"]:
+        used_pct = float(w["usage_percent"])
+        pct = max(0.0, min(100.0, 100.0 - used_pct))
+        if used_pct == 0 or not w["reset_in_sec"]:
             reset = "—"
         else:
             reset = _pad_reset(format_eta(time.time() + w["reset_in_sec"]))
-        metrics.append(Metric(label, f"{pct:.0f}%", pct, reset))
+        metrics.append(Metric(label, f"{pct:.0f}%", pct, reset, is_remaining=True))
     return metrics
 
 
@@ -328,6 +353,9 @@ def _plan_codex(raw: dict) -> str:
         session = raw.get("_session") or {}
         account = session.get("account") or {}
         value = raw.get("plan_type") or account.get("planType")
+    # The API still calls the current ChatGPT Business seat type "team".
+    if str(value or "").strip().lower() == "team":
+        return "Business"
     plan = _format_plan_value(value)
     team_name = identity.get("team_name")
     if plan == "Team" and team_name:
@@ -763,11 +791,18 @@ _STATE_LABEL = {"ok": "OK", "auth_err": "Auth Err", "net_err": "Net Err"}
 class _UsageBar:
     """Full-width progress bar with the metric value overlaid in the centre."""
 
-    def __init__(self, pct: float, value: str) -> None:
+    def __init__(self, pct: float, value: str, is_remaining: bool = False) -> None:
         self.pct = max(0.0, min(100.0, pct))
         self.value = value
+        self.is_remaining = is_remaining
 
-    def _color(self) -> str:
+    def _color(self, is_remaining: bool = False) -> str:
+        if is_remaining:
+            if self.pct > 30:
+                return "green"
+            if self.pct > 10:
+                return "yellow"
+            return "red"
         if self.pct < 70:
             return "green"
         if self.pct < 90:
@@ -785,7 +820,7 @@ class _UsageBar:
         text = self.value[:width]
         text_start = (width - len(text)) // 2
         text_end = text_start + len(text)
-        color = self._color()
+        color = self._color(self.is_remaining)
 
         text_color_on_filled = "black" if color == "yellow" else "white"
         result = Text()
@@ -812,7 +847,7 @@ class _UsageBar:
 def _usage_cell(metric: Metric):
     if metric.pct is None:
         return Text(metric.value)
-    return _UsageBar(metric.pct, metric.value)
+    return _UsageBar(metric.pct, metric.value, metric.is_remaining)
 
 
 class _WindowUsageLine:
@@ -851,7 +886,9 @@ class _WindowUsageLine:
             if len(right.plain) < bar_width:
                 right.append(" " * (bar_width - len(right.plain)))
         else:
-            bar = _UsageBar(self.metric.pct, self.metric.value)
+            bar = _UsageBar(
+                self.metric.pct, self.metric.value, self.metric.is_remaining
+            )
             bar_iter = bar.__rich_console__(
                 console, options.update(max_width=bar_width)
             )
@@ -1020,7 +1057,7 @@ def render_tables(statuses: list[ProviderStatus]):
                 usage_statuses,
                 title="Usage-Based Limits",
                 label_header="Window",
-                value_header="Usage",
+                value_header="Usage / Remaining",
             )
         )
     if payg_statuses:
@@ -1030,7 +1067,7 @@ def render_tables(statuses: list[ProviderStatus]):
             [],
             title="agent-quota",
             label_header="Window",
-            value_header="Usage",
+            value_header="Usage / Remaining",
         )
     if len(tables) == 1:
         return tables[0]

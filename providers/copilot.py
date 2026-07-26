@@ -141,20 +141,27 @@ def _fetch_copilot_usage_from_browser() -> dict:
         raise RuntimeError(f"{browser_name}: HTTP {response.status_code}")
 
     html = response.text
-    if 'id="copilot-overages-usage"' not in html:
+    # GitHub redesigned the copilot features page: the old
+    # id="copilot-overages-usage" section is gone. The usage now lives under
+    # an "Included credits" heading followed by a "N / M AI credits" text and
+    # a progress bar whose width style carries the percentage.
+    included_idx = html.find(">Included credits<")
+    if included_idx < 0:
         raise RuntimeError(f"{browser_name}: no copilot usage section found")
 
-    section_match = re.search(
-        r'<div id="copilot-overages-usage".*?</li>',
-        html,
-        re.S,
+    # Window the section up to the next sibling ("Additional usage") so the
+    # regex can't accidentally match the overage-budget's "$0.00 / $0 budget".
+    section = html[included_idx : included_idx + 6000]
+    credits_match = re.search(
+        r"(\d+)\s*/\s*(\d+)\s*AI\s+credits",
+        section,
     )
-    if not section_match:
-        raise RuntimeError(f"{browser_name}: usage section parse failed")
+    if not credits_match:
+        raise RuntimeError(f"{browser_name}: no AI credits usage found")
 
-    pct_match = re.search(r'>\s*(\d+(?:\.\d+)?)%\s*<', section_match.group(0))
-    if not pct_match:
-        raise RuntimeError(f"{browser_name}: no usage percentage found")
+    used = int(credits_match.group(1))
+    total = int(credits_match.group(2))
+    pct = (used / total * 100) if total > 0 else 0.0
 
     managed_by = re.search(
         r'Managed by\s*<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>',
@@ -163,7 +170,9 @@ def _fetch_copilot_usage_from_browser() -> dict:
     user_login = re.search(r'name="user-login"\s+content="([^"]+)"', html)
     is_individual = COPILOT_INDIVIDUAL_API_MARKER in html
     return {
-        "pct": float(pct_match.group(1)),
+        "pct": pct,
+        "used": used,
+        "total": total,
         "raw": {
             "managed_by_name": managed_by.group(2) if managed_by else None,
             "managed_by_href": managed_by.group(1) if managed_by else None,
@@ -242,7 +251,7 @@ def print_cli(usage: dict, quota: int) -> None:
         print(f"Team : {identity['team_name']}")
     if identity.get("user_name"):
         print(f"User : {identity['user_name']}")
-    print(f"Used : {used} / {quota} ({pct}%)")
+    print(f"Remaining : {max(0, quota - used)} / {quota} ({max(0, 100 - pct)}%)")
     print(f"Reset: {reset_str} (next month, 1st at 00:00 UTC)")
 
 
