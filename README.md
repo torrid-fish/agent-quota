@@ -8,7 +8,7 @@ The extension has been developed on **GNOME Shell 50**. Other desktop environmen
 
 It tracks subscription-backed and rate-limited AI usage: rolling windows, weekly caps, monthly allowances and token buckets for **Claude**, **OpenAI Codex**, **GitHub Copilot**, **OpenCode Go**, and **Z.ai**. It also shows pay-as-you-go balances for **OpenCode Zen**, **OpenRouter**, and **DeepSeek**.
 
-Pay-as-you-go balances are still supported, but as a secondary table for credits and prepaid balances such as `OpenCode Zen`, `OpenRouter`, and `DeepSeek`. Usage-based bars display the remaining allowance, with colour shifting to yellow below 30% and red below 10%; rows without a percentage render as plain text. `Claude` now resolves plan, team, and user details from its account and organization endpoints; `Codex` resolves the subscription plan plus the signed-in user name from the ChatGPT session payload. Human-readable Codex team/workspace names are still limited by what that session payload exposes.
+Pay-as-you-go balances are still supported, but as a secondary table for credits and prepaid balances such as `OpenCode Zen`, `OpenRouter`, and `DeepSeek`. Usage-based bars display the remaining allowance, with colour shifting to yellow below 30% and red below 10%; rows without a percentage render as plain text. `Claude` now resolves plan, team, and user details from its account and organization endpoints; `Codex` renders each distinct account or workspace exposed by the configured browser as its own block. Human-readable Codex team/workspace names are still limited by what those session payloads expose.
 
 Originally based on [waybar-ai-usage](https://github.com/NihilDigit/waybar-ai-usage) by [@NihilDigit](https://github.com/NihilDigit).
 
