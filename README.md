@@ -29,7 +29,7 @@ Open the popup's **Settings** action (or run `gnome-extensions prefs agent-quota
 
 - override `config.toml` and choose exactly which providers appear;
 - configure refresh interval, colour thresholds and popup spacing;
-- manage all provider-specific options from one **Providers** page, grouped by provider: for cookie-authenticated providers, select its cookie browser and open its sign-in page; for API-authenticated providers, save its API key; and adjust its popup layout options (including reset time at 100%);
+- manage all provider-specific options from one **Providers** page, grouped by provider: for cookie-authenticated providers, select its cookie browser and open its sign-in page; choose which detected Codex workspaces appear; for API-authenticated providers, save its API key; and adjust its popup layout options (including reset time at 100%);
 - shorten only the OpenCode Go email, if desired.
 
 Settings take effect immediately. After installing changed extension JavaScript or CSS on GNOME Shell 50 Wayland, log out and back in once if the installer reports that the in-memory module is still old.
@@ -88,6 +88,8 @@ For API-auth providers, `agent-quota setup` also offers to collect the key inlin
 | DeepSeek | API key | Key in `~/.config/agent-quota/deepseek.conf` |
 
 Supported cookie sources: `chrome`, `chromium`, `brave`, `edge`, `firefox`, `helium`. The first one that has a valid session wins. Override order with `--browser <name>` (repeatable).
+
+After Codex has loaded once, open **Settings → Providers → Codex → Displayed workspaces** to choose which ChatGPT workspaces appear in the popup. Leaving every detected workspace selected preserves the default behaviour and automatically includes newly discovered workspaces.
 
 For `Copilot`, `Z.ai`, `OpenRouter`, and `DeepSeek`, setup will prompt for the token/key when you enable the provider. You can still edit the corresponding `~/.config/agent-quota/*.conf` file manually later.
 
